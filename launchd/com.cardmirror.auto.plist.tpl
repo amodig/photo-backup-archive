@@ -7,7 +7,7 @@
   <array>
     <string>/bin/zsh</string>
     <string>-lc</string>
-    <string>__REPO_ROOT__/bin/card-mirror-run.sh</string>
+    <string>__REPO_ROOT__/bin/card-mirror.sh</string>
   </array>
   <key>WatchPaths</key>
   <array>

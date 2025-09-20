@@ -17,10 +17,9 @@ This system automatically detects inserted camera cards (SD cards, CF cards, etc
 ```
 photo-backup-archive/
 ├── bin/                    # Main executable scripts
-│   ├── card-mirror-run.sh  # Main entry point with config loading
-│   ├── card-mirror.sh      # Core mirroring logic
-│   ├── card-reconcile-tombstones.sh  # Tombstone management
-│   └── reconcile-all.sh    # Batch tombstone reconciliation
+│   ├── card-mirror.sh      # Main mirroring script with config loading
+│   ├── card-reconcile.sh   # Smart tombstone reconciliation
+│   └── reconcile-all.sh    # Batch reconciliation (for advanced users)
 ├── config/
 │   └── config.sh           # Optional configuration overrides
 ├── launchd/                # macOS automation
@@ -34,12 +33,12 @@ photo-backup-archive/
 
 1. **Basic usage** - Insert a camera card and run:
    ```bash
-   ./bin/card-mirror-run.sh
+   ./bin/card-mirror.sh
    ```
 
 2. **Dry run** to see what would happen:
    ```bash
-   DRY_RUN=1 ./bin/card-mirror-run.sh
+   DRY_RUN=1 ./bin/card-mirror.sh
    ```
 
 3. **Install automated service**:
@@ -49,12 +48,12 @@ photo-backup-archive/
 
 ## Scripts Reference
 
-### `card-mirror-run.sh`
-**Purpose**: Main entry point that loads configuration and runs the core mirroring script.
+### `card-mirror.sh`
+**Purpose**: Main mirroring script with config loading, card detection, and intelligent backup.
 
 **Usage**:
 ```bash
-./bin/card-mirror-run.sh [SOURCE_PATH]
+./bin/card-mirror.sh [SOURCE_PATH]
 ```
 
 **Configuration** (via environment variables or `config/config.sh`):
@@ -62,9 +61,6 @@ photo-backup-archive/
 - `KEEP_DAYS`: Days to keep quarantined files (default: `90`)
 - `FAST_MODE`: Enable speed optimizations for local disks (default: `1`)
 - `DRY_RUN`: Preview mode without making changes (default: `0`)
-
-### `card-mirror.sh`
-**Purpose**: Core mirroring engine with quarantine and tombstone support.
 
 **Features**:
 - Auto-detects external camera cards (FAT/exFAT with DCIM, PRIVATE, or AVCHD folders)
@@ -92,35 +88,51 @@ CardMirror/
     └── [mirrored files]    # Your photos and videos
 ```
 
-### `card-reconcile-tombstones.sh`
-**Purpose**: Prevents re-copying of files you've deliberately deleted from your archive.
+### `card-reconcile.sh`
+**Purpose**: Smart tombstone reconciliation with dual modes - auto-detects recent card OR processes specified card.
 
 **Usage**:
 ```bash
-./bin/card-reconcile-tombstones.sh CARD_ID [DEST_ROOT]
+# Auto-detect most recent card (typical usage)
+./bin/card-reconcile.sh
+
+# Process specific card (advanced usage)
+./bin/card-reconcile.sh CARD_ID [DEST_ROOT]
 ```
 
 **How it works**:
-1. Compares current files with the last manifest
-2. Files present in manifest but missing now are considered "NAS-side deletions"
-3. Adds these to `.tombstones` with leading `/` anchors
-4. Optionally purges them from Attic folders to save space
+1. **Auto mode**: Scans your card mirrors to find the most recently used one
+2. **Manual mode**: Processes the specified card ID
+3. Compares current files with the last manifest 
+4. Tombstones any files you've deleted from your archive
+5. Next mirror won't re-copy those deleted files
+
+**When to use**:
+After deleting unwanted photos/videos from your archive, run this before the next mirror.
 
 **Example workflow**:
-1. Mirror card → creates manifest of 100 files
-2. You delete 10 unwanted photos from your archive
-3. Run reconcile-tombstones → adds 10 paths to `.tombstones`
-4. Next mirror ignores those 10 files even if still on card
+```bash
+# 1. Mirror card
+./bin/card-mirror.sh
+
+# 2. Delete unwanted photos from archive
+rm /path/to/CardMirror/CARD-ID/DCIM/100CANON/IMG_*.JPG
+
+# 3. Tombstone the deletions (auto-detects recent card)
+./bin/card-reconcile.sh
+
+# 4. Next mirror ignores deleted files
+```
 
 ### `reconcile-all.sh`
-**Purpose**: Batch runs tombstone reconciliation for all existing card mirrors.
+**Purpose**: Batch tombstone reconciliation for all cards (advanced users with many cards).
 
 **Usage**:
 ```bash
 ./bin/reconcile-all.sh
 ```
 
-Automatically finds all card directories in `DEST_ROOT` and runs `card-reconcile-tombstones.sh` on each.
+**Note**: Most users should use `card-reconcile.sh` instead, which handles your most recent card automatically.
 
 ## Configuration
 
@@ -173,7 +185,7 @@ make test       # Test with dry run
 
 2. **`com.cardmirror.reconcile`**:
    - Runs daily at 3:30 AM
-   - Reconciles tombstones for all cards
+   - Auto-detects and reconciles your most recent card
    - Logs to `~/Library/Logs/card-reconcile.log`
 
 ### Manual Service Management
@@ -272,7 +284,7 @@ cp "/path/to/CardMirror/CARD-ID/Attic/2024-01-15/DCIM/100CANON/IMG_1234.JPG" \
 ### Manual Card Specification
 ```bash
 # Force specific source if auto-detection fails
-./bin/card-mirror-run.sh "/Volumes/MY-CAMERA-CARD"
+./bin/card-mirror.sh "/Volumes/MY-CAMERA-CARD"
 ```
 
 ### Permission Issues
@@ -317,10 +329,10 @@ Modify `RSYNC_FLAGS` in `card-mirror.sh` for custom behavior:
 Run multiple instances with different `DEST_ROOT`:
 ```bash
 # Primary backup
-DEST_ROOT="/Volumes/Primary/CardMirror" ./bin/card-mirror-run.sh
+DEST_ROOT="/Volumes/Primary/CardMirror" ./bin/card-mirror.sh
 
 # Secondary backup  
-DEST_ROOT="/Volumes/Secondary/CardMirror" ./bin/card-mirror-run.sh
+DEST_ROOT="/Volumes/Secondary/CardMirror" ./bin/card-mirror.sh
 ```
 
 ### Batch Processing
@@ -329,7 +341,7 @@ DEST_ROOT="/Volumes/Secondary/CardMirror" ./bin/card-mirror-run.sh
 for card in /Volumes/SD-* /Volumes/CF-*; do
   [[ -d "$card" ]] || continue
   echo "Processing $card..."
-  ./bin/card-mirror-run.sh "$card"
+  ./bin/card-mirror.sh "$card"
 done
 ```
 

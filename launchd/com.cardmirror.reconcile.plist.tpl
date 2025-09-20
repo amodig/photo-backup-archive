@@ -7,7 +7,7 @@
   <array>
     <string>/bin/zsh</string>
     <string>-lc</string>
-    <string>__REPO_ROOT__/bin/reconcile-all.sh</string>
+    <string>__REPO_ROOT__/bin/card-reconcile.sh</string>
   </array>
   <key>StartCalendarInterval</key>
   <dict>

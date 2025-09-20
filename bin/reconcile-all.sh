@@ -14,5 +14,5 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd -P)"
 for d in "$DEST_ROOT"/*; do
   [[ -d "$d" ]] || continue
   card_id="${d##*/}"
-  "$REPO_ROOT/bin/card-reconcile-tombstones.sh" "$card_id" "$DEST_ROOT" || true
+  "$REPO_ROOT/bin/card-reconcile.sh" "$card_id" "$DEST_ROOT" || true
 done

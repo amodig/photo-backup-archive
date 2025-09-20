@@ -1,4 +1,4 @@
-# config/config.sh — optional overrides for card-mirror-run.sh
+# config/config.sh — optional overrides for card-mirror.sh
 # Examples:
 # DEST_ROOT="$HOME/Archives/CardMirror"
 # KEEP_DAYS=30

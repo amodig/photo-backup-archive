@@ -31,5 +31,5 @@ reload: install
 
 test:
 	@echo "Running DRY_RUN mirror once…"
-	DRY_RUN=1 $(REPO_ROOT)/bin/card-mirror-run.sh || true
-	@echo "To reconcile all: $(REPO_ROOT)/bin/reconcile-all.sh"
+	DRY_RUN=1 $(REPO_ROOT)/bin/card-mirror.sh || true
+	@echo "To reconcile: $(REPO_ROOT)/bin/card-reconcile.sh"

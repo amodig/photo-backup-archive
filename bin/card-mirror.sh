@@ -4,27 +4,46 @@
 # Mirrors a card to CardMirror/<CardID>/, moves deletions/overwrites into Attic/YYYY-MM-DD/.
 # Supports per-card .tombstones (exclude list) so NAS-side culls won't be re-copied from the card.
 #
-set -e
-set -u
-set -o pipefail
+set -euo pipefail
 setopt EXTENDED_GLOB NO_CASE_GLOB
 IFS=$'\n\t'
 
-DEST_ROOT="${DEST_ROOT:-/Volumes/Extreme SSD/PhotoVault/CardMirror}"
-KEEP_DAYS="${KEEP_DAYS:-90}"
-FAST_MODE="${FAST_MODE:-1}"  # Adds -W --omit-dir-times for speed on local disks
-DRY_RUN="${DRY_RUN:-0}"  # DRY_RUN=1 to see what would happen
+# Script directory and repo root for config loading
+SCRIPT_DIR="$(cd -- "$(dirname "$0")" >/dev/null 2>&1 ; pwd -P)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd -P)"
+
+# Load optional config overrides
+[[ -f "$REPO_ROOT/config/config.sh" ]] && source "$REPO_ROOT/config/config.sh"
+
+# Set defaults (can be overridden by config or environment)
+: "${DEST_ROOT:="/Volumes/Extreme SSD/PhotoVault/CardMirror"}"
+: "${KEEP_DAYS:=90}"
+: "${FAST_MODE:=1}"  # Adds -W --omit-dir-times for speed on local disks
+: "${DRY_RUN:=0}"    # DRY_RUN=1 to see what would happen
 
 timestamp() { date "+%Y-%m-%d %H:%M:%S"; }
 log() { echo "[$(timestamp)] $*"; }
 die() { echo "[$(timestamp)] ERROR: $*" >&2; exit 1; }
+
+# Verify destination is accessible (create parent if needed)
+if [[ ! -d "$DEST_ROOT" ]]; then
+  log "Destination not found, attempting to create: $DEST_ROOT"
+  mkdir -p "$DEST_ROOT" || die "Cannot create destination: $DEST_ROOT"
+fi
 need() { command -v "$1" >/dev/null 2>&1 || die "Missing '$1'"; }
 need rsync
 
 # --- Detect source (card) ---
 # Only consider EXTERNAL/REMOVABLE camera-like FAT/exFAT volumes; skip destination drive
 SRC="${1:-}"
-dest_vol_root="$(dirname "$(dirname "$DEST_ROOT")")"  # e.g., /Volumes/Extreme SSD
+# Get destination volume root to avoid mirroring to same drive
+# Try to get the actual volume mount point, fallback to path-based detection
+dest_vol_root=""
+if [[ "$DEST_ROOT" == /Volumes/* ]]; then
+  dest_vol_root="$(echo "$DEST_ROOT" | cut -d/ -f1-3)"  # /Volumes/VolumeName
+else
+  dest_vol_root="$(dirname "$(dirname "$DEST_ROOT")")"  # fallback
+fi
 is_external() { diskutil info "$1" 2>/dev/null | grep -E "External:\s*Yes|Device Location:\s*External|Removable Media:\s*Yes" >/dev/null; }
 is_camera_tree() { [[ -d "$1/DCIM" || -d "$1/PRIVATE" || -d "$1/AVCHD" ]]; }
 is_card_fs() { diskutil info "$1" 2>/dev/null | grep -E "File System Personality:\s*(ExFAT|MS-DOS \(FAT[0-9]*\))" >/dev/null; }
@@ -91,9 +110,13 @@ RSYNC_FLAGS=(-a -m --info=progress2 --partial --modify-window=2 --no-compress
 
 rsync "${RSYNC_FLAGS[@]}" "$SRC"/ "$DEST"/
 
-# Update manifest of mirrored files (relative paths), excluding Attic
+# Update manifest of mirrored files (relative paths), excluding Attic and system files
 MANIFEST="$DEST/.manifest-last.txt"
-find "$DEST" -type f -print 2>/dev/null | grep -v "/Attic/" | sed -e "s#^$DEST/##" | sort > "$MANIFEST"
+find "$DEST" -type f -print 2>/dev/null | \
+  grep -v "/Attic/" | \
+  grep -E -v "^$DEST/\\..*$" | \
+  sed -e "s#^$DEST/##" | \
+  sort > "$MANIFEST"
 
 # --- Prune old Attic folders ---
 if [[ -d "$DEST/Attic" && "$KEEP_DAYS" -gt 0 ]]; then
