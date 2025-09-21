@@ -4,3 +4,5 @@
 # KEEP_DAYS=30
 # FAST_MODE=1
 # DRY_RUN=0
+# ATTIC_FOLDER="_Attic"
+# REJECTED_FOLDER="_Rejected"

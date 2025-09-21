@@ -16,6 +16,10 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd -P)"
 SPECIFIED_CARD="${1:-}"
 DEST_ROOT="${2:-${DEST_ROOT:-/Volumes/Extreme SSD/PhotoVault/CardMirror}}"
 
+# Set defaults (can be overridden by config or environment)
+: "${ATTIC_FOLDER:="_Attic"}"    # Name of quarantine folder
+: "${REJECTED_FOLDER:="_Rejected"}"  # Name of photo culling folder
+
 timestamp() { date "+%Y-%m-%d %H:%M:%S"; }
 log() { echo "[$(timestamp)] $*"; }
 die() { echo "[$(timestamp)] ERROR: $*" >&2; exit 1; }
@@ -72,10 +76,10 @@ TOMBSTONES="$DEST/.tombstones"
 
 log "Running tombstone reconciliation for: $CARD_ID"
 
-# Current file list (relative paths), excluding Attic
+# Current file list (relative paths), excluding Attic and _Rejected folders
 CURRENT=$(mktemp)
 trap 'rm -f "$CURRENT"' EXIT
-find "$DEST" -type f -print 2>/dev/null | grep -v "/Attic/" | sed -e "s#^$DEST/##" | sort > "$CURRENT"
+find "$DEST" -type f -print 2>/dev/null | grep -v "/$ATTIC_FOLDER/" | grep -v "/$REJECTED_FOLDER/" | sed -e "s#^$DEST/##" | sort > "$CURRENT"
 
 # Lines present in MANIFEST but not in CURRENT are files you deleted on NAS
 DELETED=$(comm -23 "$MANIFEST" "$CURRENT" || true)
@@ -94,7 +98,21 @@ sort -u "$TOMBSTONES" > "$TMP" && mv "$TMP" "$TOMBSTONES"
 COUNT=$(wc -l <<< "$DELETED" | tr -d ' ')
 log "Tombstoned $COUNT path(s). They will NOT be re-copied from the card on the next mirror."
 
-# Note: Tombstoned files may still exist in Attic folders
+# Check if we can find these files in _Rejected folders (informational)
+rejected_count=0
+while IFS= read -r deleted_file; do
+  [[ -n "$deleted_file" ]] || continue
+  # Look for the file in any _Rejected folder
+  if find "$DEST" -path "*/$REJECTED_FOLDER/*" -name "$(basename "$deleted_file")" -type f 2>/dev/null | head -1 | grep -q .; then
+    ((rejected_count++))
+  fi
+done <<< "$DELETED"
+
+if (( rejected_count > 0 )); then
+  log "Found $rejected_count of these files in $REJECTED_FOLDER folders (likely moved during photo culling)"
+fi
+
+# Note: Tombstoned files may still exist in $ATTIC_FOLDER folders
 # They will be cleaned up automatically after KEEP_DAYS by the normal mirror process
 # This preserves the safety net - you can still recover files for KEEP_DAYS period
 

@@ -20,6 +20,8 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd -P)"
 : "${KEEP_DAYS:=90}"
 : "${FAST_MODE:=1}"  # Adds -W --omit-dir-times for speed on local disks
 : "${DRY_RUN:=0}"    # DRY_RUN=1 to see what would happen
+: "${ATTIC_FOLDER:="_Attic"}"    # Name of quarantine folder
+: "${REJECTED_FOLDER:="_Rejected"}"  # Name of photo culling folder
 
 timestamp() { date "+%Y-%m-%d %H:%M:%S"; }
 log() { echo "[$(timestamp)] $*"; }
@@ -85,7 +87,7 @@ fi
 CARD_ID="${CARD_ID//[^A-Za-z0-9._-]/-}"   # sanitize
 
 DEST="$DEST_ROOT/$CARD_ID"
-ATTIC="$DEST/Attic/$(date +%F)"
+ATTIC="$DEST/$ATTIC_FOLDER"
 mkdir -p "$DEST" "$ATTIC"
 
 # Marker file
@@ -97,10 +99,25 @@ fi
 log "Mirroring from '$SRC'  →  '$DEST'"
 log "Quarantining deletes/overwrites to: $ATTIC"
 
+# Record deletion discovery in log file
+ATTIC_LOG="$ATTIC/.deletion-log.txt"
+if [[ -f "$DEST/.manifest-last.txt" ]]; then
+  # Get date when files were last confirmed present  
+  if [[ "$OSTYPE" == "darwin"* ]]; then
+    LAST_MANIFEST_DATE=$(date -r $(stat -f %m "$DEST/.manifest-last.txt" 2>/dev/null || echo 0) +%Y-%m-%d 2>/dev/null || echo "unknown")
+  else
+    LAST_MANIFEST_DATE=$(date -d @$(stat -c %Y "$DEST/.manifest-last.txt" 2>/dev/null || echo 0) +%Y-%m-%d 2>/dev/null || echo "unknown")
+  fi
+  echo "[$(date '+%Y-%m-%d %H:%M:%S')] DELETION DISCOVERY - Last manifest: $LAST_MANIFEST_DATE, Files deleted between $LAST_MANIFEST_DATE and $(date +%Y-%m-%d)" >> "$ATTIC_LOG"
+else
+  echo "[$(date '+%Y-%m-%d %H:%M:%S')] INITIAL SYNC - Any files moved to Attic are from pre-existing conditions" >> "$ATTIC_LOG"
+fi
+
 RSYNC_FLAGS=(-a -m --info=progress2 --partial --modify-window=2 --no-compress
              --exclude ".Spotlight-V100" --exclude ".Trashes" --exclude ".fseventsd" --exclude ".TemporaryItems"
              --exclude "._*"
-             --filter 'protect Attic/' --filter 'protect Attic/***'
+             --filter "protect $ATTIC_FOLDER/" --filter "protect $ATTIC_FOLDER/***"
+             --filter "protect $REJECTED_FOLDER/" --filter "protect $REJECTED_FOLDER/***"
              --delete
              --backup
              --backup-dir="$ATTIC")
@@ -110,18 +127,21 @@ RSYNC_FLAGS=(-a -m --info=progress2 --partial --modify-window=2 --no-compress
 
 rsync "${RSYNC_FLAGS[@]}" "$SRC"/ "$DEST"/
 
-# Update manifest of mirrored files (relative paths), excluding Attic and system files
+# Update manifest of mirrored files (relative paths), excluding Attic, system files, and _Rejected folders
 MANIFEST="$DEST/.manifest-last.txt"
 find "$DEST" -type f -print 2>/dev/null | \
-  grep -v "/Attic/" | \
+  grep -v "/$ATTIC_FOLDER/" | \
+  grep -v "/$REJECTED_FOLDER/" | \
   grep -E -v "^$DEST/\\..*$" | \
   sed -e "s#^$DEST/##" | \
   sort > "$MANIFEST"
 
-# --- Prune old Attic folders ---
-if [[ -d "$DEST/Attic" && "$KEEP_DAYS" -gt 0 ]]; then
-  log "Pruning Attic folders older than $KEEP_DAYS days"
-  find "$DEST/Attic" -type d -mindepth 1 -maxdepth 1 -mtime +$KEEP_DAYS -exec rm -rf {} + 2>/dev/null || true
+# --- Prune old Attic files ---
+if [[ -d "$ATTIC" && "$KEEP_DAYS" -gt 0 ]]; then
+  log "Pruning $ATTIC_FOLDER files older than $KEEP_DAYS days"
+  find "$ATTIC" -type f ! -name ".deletion-log.txt" -mtime +$KEEP_DAYS -delete 2>/dev/null || true
+  # Clean up empty directories (but keep Attic itself and the log)
+  find "$ATTIC" -type d -mindepth 1 -empty -delete 2>/dev/null || true
 fi
 
 log "Mirror complete for card: $CARD_ID"
