@@ -143,6 +143,8 @@ photo-backup-archive/
 - `KEEP_DAYS`: Days to keep quarantined files (default: `90`)
 - `FAST_MODE`: Enable speed optimizations for local disks (default: `1`)
 - `DRY_RUN`: Preview mode without making changes (default: `0`)
+- `SHOW_PROGRESS`: Log mirror percent from destination size every `PROGRESS_INTERVAL` seconds (default: `1`; readable in Cursor)
+- `PROGRESS_INTERVAL`: Seconds between progress lines (default: `15`; use `2`–`5` for frequent updates)
 
 **Features**:
 - Auto-detects external camera cards (FAT/exFAT with DCIM, PRIVATE, or AVCHD folders)

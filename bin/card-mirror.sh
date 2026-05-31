@@ -20,6 +20,8 @@ source "$SCRIPT_DIR/lib/platform.sh"
 : "${DRY_RUN:=0}"
 : "${ATTIC_FOLDER:="_Attic"}"
 : "${REJECTED_FOLDER:="_Rejected"}"
+: "${SHOW_PROGRESS:=1}"       # 0 = rsync default output only
+: "${PROGRESS_INTERVAL:=15}"  # seconds between progress log lines (minimum 1)
 
 timestamp() { date "+%Y-%m-%d %H:%M:%S"; }
 log() { echo "[$(timestamp)] $*"; }
@@ -90,6 +92,9 @@ fi
 
 log "Mirroring from '$SRC'  →  '$DEST'"
 log "Quarantining deletes/overwrites to: $ATTIC"
+IFS=$'\t' read -r SRC_KB SRC_LABEL SRC_COUNT < <(platform_measure_source "$SRC")
+IFS=$'\n\t'
+log "Source: ~${SRC_LABEL}, ~${SRC_COUNT} files"
 
 ATTIC_LOG="$ATTIC/.deletion-log.txt"
 if [[ -f "$DEST/.manifest-last.txt" ]]; then
@@ -99,13 +104,14 @@ else
   echo "[$(date '+%Y-%m-%d %H:%M:%S')] INITIAL SYNC - Any files moved to Attic are from pre-existing conditions" >> "$ATTIC_LOG"
 fi
 
-RSYNC_FLAGS=(-a -m "$(platform_rsync_progress_flag)" --partial --modify-window=2 --no-compress
+RSYNC_FLAGS=(-a -m --partial --modify-window=2 --no-compress
   --exclude ".Spotlight-V100" --exclude ".Trashes" --exclude ".fseventsd" --exclude ".TemporaryItems"
   --exclude "._*" --exclude ".DS_Store"
   --filter "protect $ATTIC_FOLDER/" --filter "protect $ATTIC_FOLDER/***"
   --filter "protect $REJECTED_FOLDER/" --filter "protect $REJECTED_FOLDER/***"
   --filter "protect CARD_ID.txt" --filter "protect .manifest-last.txt" --filter "protect .tombstones"
   --delete --backup --backup-dir="$ATTIC")
+[[ "$SHOW_PROGRESS" != "1" ]] && RSYNC_FLAGS+=("$(platform_rsync_info_flags)")
 [[ -f "$DEST/.tombstones" ]] && RSYNC_FLAGS+=(--exclude-from="$DEST/.tombstones")
 [[ "$FAST_MODE" == "1" ]] && RSYNC_FLAGS+=(-W --omit-dir-times)
 [[ "$DRY_RUN" == "1" ]] && RSYNC_FLAGS+=(-n)
@@ -113,15 +119,63 @@ if platform_dest_is_nfs "$DEST"; then
   RSYNC_FLAGS+=(--no-group --no-owner)
 fi
 
-rsync "${RSYNC_FLAGS[@]}" "$SRC"/ "$DEST"/
+[[ "$PROGRESS_INTERVAL" =~ ^[0-9]+$ ]] && (( PROGRESS_INTERVAL >= 1 )) || PROGRESS_INTERVAL=15
+
+rsync_status=0
+if [[ "$SHOW_PROGRESS" == "1" ]]; then
+  log "Starting rsync (quiet; progress line at most every ${PROGRESS_INTERVAL}s when % rises)..."
+  declare -A PROGRESS_STATE=(
+    [last_kb]=0 [last_time]=0 [last_emit]=0 [last_pct]=-1 [preparing]=0
+    [last_finalize_emit]=0 [finalize_started]=0
+  )
+
+  rsync "${RSYNC_FLAGS[@]}" "$SRC"/ "$DEST"/ &
+  rsync_pid=$!
+
+  while platform_pid_running "$rsync_pid"; do
+    if platform_mirror_progress_tick "$DEST" "$SRC_KB" "$SRC_LABEL" "$PROGRESS_INTERVAL" PROGRESS_STATE; then
+      log "$PLATFORM_MIRROR_TICK_MSG"
+    else
+      if (( PROGRESS_STATE[last_pct] >= 99 )) \
+        && platform_mirror_finalize_heartbeat "$DEST" "$SRC_LABEL" "$PROGRESS_INTERVAL" PROGRESS_STATE; then
+        log "$PLATFORM_MIRROR_TICK_MSG"
+      fi
+    fi
+    platform_pid_running "$rsync_pid" || break
+    sleep "$PROGRESS_INTERVAL"
+  done
+
+  log "Rsync finished; waiting for exit…"
+  if wait "$rsync_pid"; then
+    rsync_status=0
+  else
+    rsync_status=$?
+  fi
+
+  if platform_mirror_progress_tick "$DEST" "$SRC_KB" "$SRC_LABEL" "$PROGRESS_INTERVAL" PROGRESS_STATE; then
+    log "$PLATFORM_MIRROR_TICK_MSG"
+  fi
+else
+  if ! rsync "${RSYNC_FLAGS[@]}" "$SRC"/ "$DEST"/; then
+    rsync_status=$?
+  fi
+fi
+[[ "$rsync_status" -eq 0 ]] || die "rsync failed (exit $rsync_status)"
 
 MANIFEST="$DEST/.manifest-last.txt"
-find "$DEST" -type f -print 2>/dev/null \
-  | grep -v "/$ATTIC_FOLDER/" \
-  | grep -v "/$REJECTED_FOLDER/" \
-  | grep -E -v "^$DEST/\\..*$" \
-  | sed -e "s#^$DEST/##" \
-  | sort > "$MANIFEST"
+log "Building manifest (scanning mirror)…"
+manifest_count=0
+while IFS= read -r line; do
+  case "$line" in
+    MANIFEST_COUNT:*)
+      manifest_count="${line#MANIFEST_COUNT:}"
+      ;;
+    MANIFEST_PROGRESS:*)
+      log "${line#MANIFEST_PROGRESS:}"
+      ;;
+  esac
+done < <(platform_build_card_manifest "$DEST" "$MANIFEST" "$ATTIC_FOLDER" "$REJECTED_FOLDER" "$PROGRESS_INTERVAL")
+log "Manifest updated (${manifest_count} paths)"
 
 if [[ -d "$ATTIC" && "$KEEP_DAYS" -gt 0 ]]; then
   log "Pruning $ATTIC_FOLDER files older than $KEEP_DAYS days"
