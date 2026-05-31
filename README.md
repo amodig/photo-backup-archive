@@ -79,8 +79,8 @@ Optional: `python3-pil` — JPEG-only fallback if `exiftool` is not installed. M
 
 ```bash
 udisksctl mount -b /dev/sdX1
-./bin/card-label.sh I              # I = Ida; A = Arttu — proposes I2605A etc.
-# if prompted: sudo exfatlabel /dev/sdX1 I2605A && udisksctl mount -b /dev/sdX1
+./bin/card-label.sh --quick I        # fast (~1 s); omit --quick for full scan
+# if prompted: sudo exfatlabel /dev/sdX1 I2405A && udisksctl mount -b /dev/sdX1
 ./bin/card-mirror.sh
 ```
 
@@ -309,7 +309,7 @@ Examples: `A2408A` (first card with earliest photos in Aug 2024), `A2408B` (seco
 
 Before naming a new card, check existing folders under `CardMirror/` and use the next free sequence letter for that prefix.
 
-**Linux:** run `./bin/card-label.sh <initial>` after mounting the card (see [Ubuntu prerequisites](#ubuntu-prerequisites)). **macOS:** `diskutil rename diskXsY CARD_ID`.
+**Linux:** run `./bin/card-label.sh --quick <initial>` after mounting (see [Ubuntu prerequisites](#ubuntu-prerequisites)); omit `--quick` when you need the true earliest EXIF date across the whole card. **macOS:** `diskutil rename diskXsY CARD_ID`.
 
 ### Runtime behavior
 

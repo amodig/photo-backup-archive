@@ -2,9 +2,10 @@
 # card-label.sh — Propose CARD_ID from earliest photo EXIF and rename exfat volume (Linux)
 #
 # Usage:
-#   ./bin/card-label.sh I              # owner initial Ida → e.g. I2411A
+#   ./bin/card-label.sh I                    # full EXIF scan (~1–3 min on large cards)
+#   ./bin/card-label.sh --quick I            # fast: one sample per DCIM folder (~1 sec)
 #   ./bin/card-label.sh I /media/amodig/MYDISK
-#   DRY_RUN=1 ./bin/card-label.sh I    # print proposal only
+#   DRY_RUN=1 ./bin/card-label.sh --quick I
 #
 set -euo pipefail
 
@@ -17,20 +18,20 @@ source "$SCRIPT_DIR/lib/platform.sh"
 
 : "${DEST_ROOT:=$(platform_default_dest_root)}"
 : "${DRY_RUN:=0}"
-
-OWNER_INITIAL="${1:-}"
-SRC="${2:-}"
+: "${QUICK:=0}"
 
 die() { echo "ERROR: $*" >&2; exit 1; }
 
 usage() {
   cat <<EOF
-Usage: $0 <owner-initial> [card-mount-path]
+Usage: $0 [--quick] <owner-initial> [card-mount-path]
 
   owner-initial   Single letter, e.g. I for Ida, A for Arttu
   card-mount-path Optional; auto-detects a mounted camera card if omitted
+  --quick         Sample EXIF from the first still in each DCIM/* folder (fast, like
+                  Finder eyeballing). Default: scan all stills for true earliest date.
 
-Naming: {OwnerInitial}{YYMM}{Sequence} from earliest EXIF DateTimeOriginal in DCIM.
+Naming: {OwnerInitial}{YYMM}{Sequence} from EXIF DateTimeOriginal in DCIM.
 Checks existing folders under DEST_ROOT for the next free sequence letter.
 
 Requires: exiftool (recommended) or python3-pillow; exfatprogs for volume rename.
@@ -38,6 +39,18 @@ Mount the card first:  udisksctl mount -b /dev/sdX1
 EOF
   exit 2
 }
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --quick) QUICK=1; shift ;;
+    -h|--help) usage ;;
+    -*) die "Unknown option: $1 (try --help)" ;;
+    *) break ;;
+  esac
+done
+
+OWNER_INITIAL="${1:-}"
+SRC="${2:-}"
 
 [[ -n "$OWNER_INITIAL" ]] || usage
 [[ "$OWNER_INITIAL" =~ ^[A-Za-z]$ ]] || die "owner-initial must be a single letter"
@@ -67,9 +80,76 @@ fi
 [[ -d "$SRC/DCIM" ]] || die "No DCIM on $SRC — is this a camera card?"
 platform_is_card_fs "$SRC" || die "Not a FAT/exFAT mount: $SRC"
 
-earliest_exif() {
+# Stills only (skip MOV/MP4).
+STILL_NAME_RE='.*\.(JPG|JPEG|RW2|ORF|ARW|CR2|CR3|NEF|HEIC|TIF|TIFF|jpg|jpeg|rw2|orf|arw|cr2|cr3|nef|heic|tif|tiff)$'
+
+exif_ym_from_files() {
+  local -a files=("$@")
+  ((${#files[@]})) || return 1
+  command -v exiftool >/dev/null 2>&1 || return 1
+  set +o pipefail
+  exiftool -fast2 -T -DateTimeOriginal -d %y%m "${files[@]}" 2>/dev/null \
+    | grep -E '^[0-9]{4}$' | sort -n | head -1
+  set -o pipefail
+}
+
+pick_sequence() {
+  local prefix="$1"
+  local letter u
+  local -a used=()
+  local listing
+
+  listing="$(timeout 10 ls -1 "$DEST_ROOT" 2>/dev/null)" || {
+    echo "WARN: Could not list $DEST_ROOT (NFS slow/unmounted?) — assuming sequence A." >&2
+    echo "A"
+    return 0
+  }
+  while IFS= read -r name; do
+    [[ "$name" =~ ^${prefix}[A-Z]$ ]] && used+=("${name: -1}")
+  done <<< "$listing"
+
+  for letter in {A..Z}; do
+    for u in "${used[@]}"; do
+      [[ "$u" == "$letter" ]] && continue 2
+    done
+    echo "$letter"
+    return 0
+  done
+  return 1
+}
+
+first_still_in_dir() {
+  local dir="$1"
+  local f
+  f="$(find "$dir" -maxdepth 1 -type f \( -iname '*.jpg' -o -iname '*.jpeg' \) 2>/dev/null | sort | head -1)"
+  [[ -n "$f" ]] && { echo "$f"; return; }
+  find "$dir" -maxdepth 1 -type f -regextype posix-extended -regex "$STILL_NAME_RE" 2>/dev/null \
+    | sort | head -1
+}
+
+earliest_exif_quick() {
   local dcim="$1"
-  # Stills only (skip MOV/MP4 — huge and rarely define card "earliest photo" month).
+  local -a samples=()
+  local dir f
+
+  echo "Quick EXIF sample (first still per DCIM folder)..." >&2
+  while IFS= read -r -d '' dir; do
+    f="$(first_still_in_dir "$dir")"
+    [[ -n "$f" ]] && samples+=("$f")
+  done < <(find "$dcim" -mindepth 1 -maxdepth 1 -type d -print0 | sort -z)
+
+  if ((${#samples[@]} == 0)); then
+    f="$(find "$dcim" -type f -regextype posix-extended -regex "$STILL_NAME_RE" 2>/dev/null | sort | head -1)"
+    [[ -n "$f" ]] && samples=("$f")
+  fi
+
+  ((${#samples[@]})) || return 1
+  echo "  ${#samples[@]} sample file(s)" >&2
+  exif_ym_from_files "${samples[@]}"
+}
+
+earliest_exif_full() {
+  local dcim="$1"
   local -a exts=(JPG JPEG RW2 ORF ARW CR2 CR3 NEF HEIC TIF TIFF)
   local -a ext_args=()
   local e
@@ -78,7 +158,7 @@ earliest_exif() {
     for e in "${exts[@]}"; do
       ext_args+=(-ext "$e" -ext "${e,,}")
     done
-    echo "Scanning EXIF for earliest photo (large cards: 1–3 min)..." >&2
+    echo "Full EXIF scan (large cards: 1–3 min)..." >&2
     set +o pipefail
     exiftool -progress -fast2 -T -DateTimeOriginal -d %y%m "${ext_args[@]}" -r "$dcim" \
       | grep -E '^[0-9]{4}$' | sort -n | head -1
@@ -132,17 +212,18 @@ if best:
 PY
 }
 
-EARLIEST_YM="$(earliest_exif "$SRC/DCIM" | tr -d '\r\n')"
+if [[ "$QUICK" == "1" ]]; then
+  EARLIEST_YM="$(earliest_exif_quick "$SRC/DCIM" | tr -d '\r\n')"
+  EXIF_MODE="quick sample (not full card scan)"
+else
+  EARLIEST_YM="$(earliest_exif_full "$SRC/DCIM" | tr -d '\r\n')"
+  EXIF_MODE="full EXIF scan"
+fi
+
 [[ -n "$EARLIEST_YM" && "$EARLIEST_YM" =~ ^[0-9]{4}$ ]] || die "No EXIF dates in DCIM. Install exiftool: sudo apt install libimage-exiftool-perl"
 
 PREFIX="${OWNER_INITIAL}${EARLIEST_YM}"
-SEQUENCE=""
-for letter in {A..Z}; do
-  [[ -d "$DEST_ROOT/${PREFIX}${letter}" ]] && continue
-  SEQUENCE="$letter"
-  break
-done
-[[ -n "$SEQUENCE" ]] || die "No free sequence letter for prefix $PREFIX under $DEST_ROOT"
+SEQUENCE="$(pick_sequence "$PREFIX")" || die "No free sequence letter for prefix $PREFIX under $DEST_ROOT"
 
 CARD_ID="${PREFIX}${SEQUENCE}"
 CURRENT_LABEL="$(findmnt -n -o LABEL --target "$SRC" 2>/dev/null || true)"
@@ -153,9 +234,10 @@ DEV="${DEV#/dev/}"
 echo "Mount:            $SRC"
 echo "Device:           ${DEV:-unknown}"
 echo "Current label:    ${CURRENT_LABEL:-<none>}"
-echo "Earliest month:   20${EARLIEST_YM:0:2}-${EARLIEST_YM:2:2} (from EXIF)"
+echo "Earliest month:   20${EARLIEST_YM:0:2}-${EARLIEST_YM:2:2} (from ${EXIF_MODE})"
 echo "Proposed CARD_ID: $CARD_ID"
 echo "Mirror dest:      $DEST_ROOT/$CARD_ID"
+[[ "$QUICK" == "1" ]] && echo "Note: --quick may differ from a full scan if early shots were deleted or files reordered."
 
 [[ "$DRY_RUN" == "1" ]] && { echo "DRY_RUN=1 — no changes made."; exit 0; }
 
