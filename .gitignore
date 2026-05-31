@@ -40,3 +40,6 @@ Desktop.ini
 
 # Claude Code per-project local settings (personal overrides, never commit)
 .claude/settings.local.json
+
+# Machine-specific mirror paths (copy from config/config.sh.example)
+config/config.sh

@@ -48,6 +48,45 @@ DEST_ROOT="/mnt/photos/PhotoVault/CardMirror" ./bin/card-mirror.sh /media/$USER/
 
 Auto-detect scans `/media/$USER/*` and `/run/media/$USER/*` for the card (override with `CARD_MOUNT_ROOTS`). **launchd automation is macOS only.**
 
+**Headless Ubuntu (no desktop / no manual `udisksctl`):** install udev automount once so labeled exfat/vfat camera cards appear under `/media/$USER/<LABEL>` on insert:
+
+```bash
+sudo MOUNT_USER=$USER ./bin/install-linux-card-mount.sh
+cp config/config.sh.example config/config.sh   # set DEST_ROOT to your NAS share mount
+journalctl -t card-automount -n 20             # troubleshoot
+```
+
+When `DEST_ROOT` is on **NFS/SMB**, `card-mirror.sh` automatically adds `--no-owner --no-group` so rsync does not fail with exit code 23 on permission errors.
+
+### Ubuntu prerequisites
+
+On a headless media server, install packages once:
+
+```bash
+sudo apt install rsync util-linux exfatprogs libimage-exiftool-perl python3
+```
+
+| Package | Used for |
+|---------|----------|
+| `rsync` | `card-mirror.sh` transfers |
+| `util-linux` | `findmnt`, `lsblk` — mount detection |
+| `exfatprogs` | exFAT cards (`exfatlabel` to rename volume to `CARD_ID`; kernel exFAT mount) |
+| `libimage-exiftool-perl` | `card-label.sh` — earliest photo date from EXIF (JPEG, ORF, etc.) |
+| `python3` | `card-automount.sh` — decode udev-escaped volume labels on unmount |
+
+Optional: `python3-pil` — JPEG-only fallback if `exiftool` is not installed. Mount the NAS **share** separately (e.g. `nfs-common` + `/etc/fstab` entry for `/mnt/photos`).
+
+**New or unlabeled cards** — automount requires a filesystem label. Mount once, then name the card:
+
+```bash
+udisksctl mount -b /dev/sdX1
+./bin/card-label.sh --quick I        # fast (~1 s); omit --quick for full scan
+# if prompted: sudo exfatlabel /dev/sdX1 I2405A && udisksctl mount -b /dev/sdX1
+./bin/card-mirror.sh
+```
+
+Cards must be **labeled** exfat/vfat with a DCIM tree for headless automount to pick them up on insert.
+
 ## Directory Structure
 
 ```
@@ -56,9 +95,15 @@ photo-backup-archive/
 │   ├── card-mirror.sh      # Main mirroring script with config loading
 │   ├── card-reconcile.sh   # Smart tombstone reconciliation
 │   ├── reconcile-all.sh    # Batch reconciliation (for advanced users)
+│   ├── install-linux-card-mount.sh  # One-time headless SD automount setup
+│   ├── card-label.sh       # Linux: propose CARD_ID from EXIF + rename exfat label
 │   └── lib/platform.sh     # macOS + Linux mount/detection helpers
 ├── config/
-│   └── config.sh           # Optional configuration overrides
+│   ├── config.sh.example   # Copy to config/config.sh (gitignored)
+│   └── linux/              # udev/polkit templates for headless automount
+│       ├── card-automount.sh
+│       ├── 99-camera-sd-automount.rules
+│       └── 50-udisks-mount-plugdev.rules
 ├── launchd/                # macOS automation
 │   ├── com.cardmirror.auto.plist.tpl      # Auto-run template
 │   └── com.cardmirror.reconcile.plist.tpl # Reconcile template
@@ -191,7 +236,11 @@ DRY_RUN=0
 ```
 
 ### Configuration File
-Create `config/config.sh` to override defaults (copy from `config/config.sh` comments):
+Create `config/config.sh` from the example (gitignored — do not commit machine paths):
+
+```bash
+cp config/config.sh.example config/config.sh
+```
 
 ```bash
 # Travel — rugged external SSD (default volume name in scripts)
@@ -260,6 +309,8 @@ Card IDs (and volume labels) follow **`{OwnerInitial}{YYMM}{Sequence}`**:
 Examples: `A2408A` (first card with earliest photos in Aug 2024), `A2408B` (second card with the same earliest month).
 
 Before naming a new card, check existing folders under `CardMirror/` and use the next free sequence letter for that prefix.
+
+**Linux:** run `./bin/card-label.sh --quick <initial>` after mounting (see [Ubuntu prerequisites](#ubuntu-prerequisites)); omit `--quick` when you need the true earliest EXIF date across the whole card. **macOS:** `diskutil rename diskXsY CARD_ID`.
 
 ### Runtime behavior
 
@@ -406,7 +457,7 @@ done
 
 - **bash**, **rsync**
 - **macOS**: `diskutil` for card auto-detect; optional **launchd** (`make install`)
-- **Linux** (e.g. Ubuntu media server): `findmnt`, `util-linux` (`lsblk` recommended); card mounts under `/media/$USER/` or `/run/media/$USER/`
+- **Linux (Ubuntu media server)**: see [Ubuntu prerequisites](#ubuntu-prerequisites) — `findmnt`, `lsblk`, `exfatprogs`, `libimage-exiftool-perl`; NAS share mounted at `DEST_ROOT` parent path
 - **External drive** or NAS mount for `DEST_ROOT`
 - **Camera cards** formatted as FAT/exFAT
 

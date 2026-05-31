@@ -147,3 +147,18 @@ platform_rsync_progress_flag() {
     echo --progress
   fi
 }
+
+# NFS (and similar remote FS) often reject chgrp/chown; rsync -a then exits 23.
+platform_dest_is_nfs() {
+  local path="$1"
+  case "$(platform_os)" in
+    Linux)
+      command -v findmnt >/dev/null 2>&1 || return 1
+      findmnt -n -o FSTYPE --target "$path" 2>/dev/null | grep -qE '^(nfs|nfs4|cifs|smb|smb3)$'
+      ;;
+    Darwin)
+      mount | grep -F " on ${path}/" | grep -qE 'smbfs|afpfs|nfs'
+      ;;
+    *) return 1 ;;
+  esac
+}
