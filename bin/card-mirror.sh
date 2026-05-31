@@ -109,11 +109,15 @@ RSYNC_FLAGS=(-a -m --partial --modify-window=2 --no-compress
   --exclude "._*" --exclude ".DS_Store"
   --filter "protect $ATTIC_FOLDER/" --filter "protect $ATTIC_FOLDER/***"
   --filter "protect $REJECTED_FOLDER/" --filter "protect $REJECTED_FOLDER/***"
+  --filter "protect CARD_ID.txt" --filter "protect .manifest-last.txt" --filter "protect .tombstones"
   --delete --backup --backup-dir="$ATTIC")
 [[ "$SHOW_PROGRESS" != "1" ]] && RSYNC_FLAGS+=("$(platform_rsync_info_flags)")
 [[ -f "$DEST/.tombstones" ]] && RSYNC_FLAGS+=(--exclude-from="$DEST/.tombstones")
 [[ "$FAST_MODE" == "1" ]] && RSYNC_FLAGS+=(-W --omit-dir-times)
 [[ "$DRY_RUN" == "1" ]] && RSYNC_FLAGS+=(-n)
+if platform_dest_is_nfs "$DEST"; then
+  RSYNC_FLAGS+=(--no-group --no-owner)
+fi
 
 [[ "$PROGRESS_INTERVAL" =~ ^[0-9]+$ ]] && (( PROGRESS_INTERVAL >= 1 )) || PROGRESS_INTERVAL=15
 

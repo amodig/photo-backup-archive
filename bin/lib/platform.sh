@@ -327,3 +327,18 @@ platform_measure_source() {
   size_h="$(du -sh "$src" 2>/dev/null | awk '{print $1}')"
   printf '%s\t%s\t%s\n' "${size_kb:-0}" "${size_h:-?}" "${count:-0}"
 }
+
+# NFS (and similar remote FS) often reject chgrp/chown; rsync -a then exits 23.
+platform_dest_is_nfs() {
+  local path="$1"
+  case "$(platform_os)" in
+    Linux)
+      command -v findmnt >/dev/null 2>&1 || return 1
+      findmnt -n -o FSTYPE --target "$path" 2>/dev/null | grep -qE '^(nfs|nfs4|cifs|smb|smb3)$'
+      ;;
+    Darwin)
+      mount | grep -F " on ${path}/" | grep -qE 'smbfs|afpfs|nfs'
+      ;;
+    *) return 1 ;;
+  esac
+}
