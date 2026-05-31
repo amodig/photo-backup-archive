@@ -98,3 +98,16 @@ DEST_ROOT="/Volumes/Photos/PhotoVault/CardMirror" DRY_RUN=1 \
 | Ubuntu home | User’s NAS **share** mount (configure in `config/config.sh`; not `/Volumes/...`) |
 
 Prefer Ubuntu + mounted NAS share over Mac Wi‑Fi AFP for large card mirrors.
+
+## Headless Ubuntu media server
+
+No GNOME automount or `udisksctl` password prompts — one-time install:
+
+```bash
+sudo MOUNT_USER=$USER ./bin/install-linux-card-mount.sh
+cp config/config.sh.example config/config.sh   # DEST_ROOT = NAS share mount
+```
+
+On insert, labeled exfat/vfat cards with a DCIM (or PRIVATE/AVCHD) tree mount at `/media/$USER/<LABEL>`. Logs: `journalctl -t card-automount`.
+
+If automount misses a card, re-plug once or run `udisksctl mount -b /dev/sdX1` (polkit rule allows passwordless mount for `plugdev` after install).

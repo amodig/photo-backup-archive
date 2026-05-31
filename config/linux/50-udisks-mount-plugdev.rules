@@ -1,0 +1,9 @@
+// Passwordless udisks mount for local plugdev users (optional fallback if udev automount misses a card).
+// Installed by: ./bin/install-linux-card-mount.sh
+polkit.addRule(function(action, subject) {
+    if ((action.id == "org.freedesktop.udisks2.filesystem-mount" ||
+         action.id == "org.freedesktop.udisks2.filesystem-mount-system") &&
+        subject.isInGroup("plugdev") && subject.local && subject.active) {
+        return polkit.Result.YES;
+    }
+});

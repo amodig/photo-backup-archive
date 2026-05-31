@@ -48,6 +48,16 @@ DEST_ROOT="/mnt/photos/PhotoVault/CardMirror" ./bin/card-mirror.sh /media/$USER/
 
 Auto-detect scans `/media/$USER/*` and `/run/media/$USER/*` for the card (override with `CARD_MOUNT_ROOTS`). **launchd automation is macOS only.**
 
+**Headless Ubuntu (no desktop / no manual `udisksctl`):** install udev automount once so labeled exfat/vfat camera cards appear under `/media/$USER/<LABEL>` on insert:
+
+```bash
+sudo MOUNT_USER=$USER ./bin/install-linux-card-mount.sh
+cp config/config.sh.example config/config.sh   # set DEST_ROOT to your NAS share mount
+journalctl -t card-automount -n 20             # troubleshoot
+```
+
+When `DEST_ROOT` is on **NFS/SMB**, `card-mirror.sh` automatically adds `--no-owner --no-group` so rsync does not fail with exit code 23 on permission errors.
+
 ## Directory Structure
 
 ```
@@ -56,9 +66,14 @@ photo-backup-archive/
 │   ├── card-mirror.sh      # Main mirroring script with config loading
 │   ├── card-reconcile.sh   # Smart tombstone reconciliation
 │   ├── reconcile-all.sh    # Batch reconciliation (for advanced users)
+│   ├── install-linux-card-mount.sh  # One-time headless SD automount setup
 │   └── lib/platform.sh     # macOS + Linux mount/detection helpers
 ├── config/
-│   └── config.sh           # Optional configuration overrides
+│   ├── config.sh.example   # Copy to config/config.sh (gitignored)
+│   └── linux/              # udev/polkit templates for headless automount
+│       ├── card-automount.sh
+│       ├── 99-camera-sd-automount.rules
+│       └── 50-udisks-mount-plugdev.rules
 ├── launchd/                # macOS automation
 │   ├── com.cardmirror.auto.plist.tpl      # Auto-run template
 │   └── com.cardmirror.reconcile.plist.tpl # Reconcile template
@@ -191,7 +206,11 @@ DRY_RUN=0
 ```
 
 ### Configuration File
-Create `config/config.sh` to override defaults (copy from `config/config.sh` comments):
+Create `config/config.sh` from the example (gitignored — do not commit machine paths):
+
+```bash
+cp config/config.sh.example config/config.sh
+```
 
 ```bash
 # Travel — rugged external SSD (default volume name in scripts)
