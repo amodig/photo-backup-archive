@@ -25,6 +25,15 @@ need_mount_user() {
   }
 }
 
+resolve_mount_ids() {
+  if ! id -u "$MOUNT_USER" >/dev/null 2>&1; then
+    log "unknown MOUNT_USER=$MOUNT_USER — fix /etc/default/card-automount and re-run install"
+    exit 1
+  fi
+  uid="$(id -u "$MOUNT_USER")"
+  gid="$(id -g "$MOUNT_USER")"
+}
+
 mount_dev() {
   local dev="$1"
   local node="/dev/${dev}"
@@ -48,8 +57,7 @@ mount_dev() {
   }
 
   mountpoint="${MOUNT_ROOT}/${label}"
-  uid="$(id -u "$MOUNT_USER" 2>/dev/null || echo 1000)"
-  gid="$(id -g "$MOUNT_USER" 2>/dev/null || echo 1000)"
+  resolve_mount_ids
 
   mkdir -p "$mountpoint"
   mount -o "uid=${uid},gid=${gid},umask=022" "$node" "$mountpoint"

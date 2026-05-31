@@ -23,6 +23,11 @@ need_root
   exit 1
 }
 
+id -u "$MOUNT_USER" >/dev/null 2>&1 || {
+  echo "Unknown user: $MOUNT_USER" >&2
+  exit 1
+}
+
 [[ -f "$LINUX_CFG/card-automount.sh" ]] || { echo "Missing $LINUX_CFG/card-automount.sh" >&2; exit 1; }
 
 command -v python3 >/dev/null 2>&1 || {
