@@ -16,6 +16,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd -P)"
 [[ -f "$REPO_ROOT/config/config.sh" ]] && source "$REPO_ROOT/config/config.sh"
 
 # Set defaults (can be overridden by config or environment)
+# Default: travel rugged SSD (common mount name "Extreme SSD"); override for NAS — see README
 : "${DEST_ROOT:="/Volumes/Extreme SSD/PhotoVault/CardMirror"}"
 : "${KEEP_DAYS:=90}"
 : "${FAST_MODE:=1}"  # Adds -W --omit-dir-times for speed on local disks

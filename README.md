@@ -12,6 +12,19 @@ This system automatically detects inserted camera cards (SD cards, CF cards, etc
 - **Tombstone management** - Prevents re-copying of files you've intentionally deleted from your archive
 - **Automated scheduling** - Optional launchd integration for hands-free operation
 
+## Backup destinations
+
+Scripts default to a **portable rugged SSD** volume named `Extreme SSD` — a common macOS mount name for travel drives (e.g. SanDisk Extreme). That default is intentional: many people mirror cards to a bus-powered SSD while away from home, then sync the archive to a NAS later.
+
+| Context | Typical `DEST_ROOT` | Notes |
+|---------|---------------------|--------|
+| **Travel / field** | `/Volumes/Extreme SSD/PhotoVault/CardMirror` | Default in scripts; fast local USB; works offline |
+| **Home / NAS** | `/Volumes/Photos/PhotoVault/CardMirror` | Network share; prefer Ethernet + SMB; see transfer-path skill |
+
+The same `CardMirror/<CARD_ID>/` layout is used on both targets so card IDs stay consistent whether you mirror on the road or at home. Override `DEST_ROOT` in `config/config.sh` or per run — do not commit machine-specific paths unless this repo is personal-only.
+
+**If both the travel SSD and NAS are mounted**, prefer mirroring to the travel SSD first (fast local USB); sync or copy to the NAS separately when convenient.
+
 ## Directory Structure
 
 ```
@@ -57,7 +70,7 @@ photo-backup-archive/
 ```
 
 **Configuration** (via environment variables or `config/config.sh`):
-- `DEST_ROOT`: Backup destination directory (default: `/Volumes/Extreme SSD/PhotoVault/CardMirror`)
+- `DEST_ROOT`: Backup destination directory (default: travel SSD — `/Volumes/Extreme SSD/PhotoVault/CardMirror`; see [Backup destinations](#backup-destinations))
 - `KEEP_DAYS`: Days to keep quarantined files (default: `90`)
 - `FAST_MODE`: Enable speed optimizations for local disks (default: `1`)
 - `DRY_RUN`: Preview mode without making changes (default: `0`)
@@ -154,11 +167,15 @@ DRY_RUN=0
 ```
 
 ### Configuration File
-Create `config/config.sh` to override defaults:
+Create `config/config.sh` to override defaults (copy from `config/config.sh` comments):
 
 ```bash
-# Example config/config.sh
-DEST_ROOT="$HOME/Archives/CardMirror"
+# Travel — rugged external SSD (default volume name in scripts)
+# DEST_ROOT="/Volumes/Extreme SSD/PhotoVault/CardMirror"
+
+# Home — NAS PhotoVault share (example; use your mount name)
+# DEST_ROOT="/Volumes/Photos/PhotoVault/CardMirror"
+
 KEEP_DAYS=30
 FAST_MODE=1
 DRY_RUN=0
@@ -204,15 +221,31 @@ tail -f ~/Library/Logs/card-reconcile.log
 
 ## Card ID Management
 
-The system uses stable card identifiers to handle volume name changes:
+The system uses stable card identifiers to handle volume name changes.
+
+### Naming convention
+
+Card IDs (and volume labels) follow **`{OwnerInitial}{YYMM}{Sequence}`**:
+
+| Part | Meaning |
+|------|---------|
+| `{OwnerInitial}` | First letter of the card owner's first name |
+| `{YYMM}` | Two-digit year + month of the **earliest** photo on the card (from EXIF `DateTimeOriginal`) |
+| `{Sequence}` | Single letter `A`–`Z` when multiple cards share the same owner and earliest month |
+
+Examples: `A2408A` (first card with earliest photos in Aug 2024), `A2408B` (second card with the same earliest month).
+
+Before naming a new card, check existing folders under `CardMirror/` and use the next free sequence letter for that prefix.
+
+### Runtime behavior
 
 1. **First mirror**: Creates `CARD_ID.txt` in destination with card info
 2. **Subsequent mirrors**: Uses existing `CARD_ID.txt` for consistency
-3. **Card-side ID**: Place `CARD_ID.txt` on card itself to override volume name
+3. **Card-side ID**: Place `CARD_ID.txt` on the card to override the volume name
 
 Example `CARD_ID.txt`:
 ```
-CARD_ID=Canon-EOS-R5-CF-01
+CARD_ID=A2408A
 Created=2024-03-15T10:30:00Z
 ```
 
