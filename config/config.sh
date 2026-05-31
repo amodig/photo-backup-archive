@@ -1,13 +1,15 @@
 # config/config.sh — optional overrides for card-mirror.sh
 #
 # macOS defaults: /Volumes/Extreme SSD/PhotoVault/CardMirror (travel SSD)
-# Linux defaults:  /mnt/PhotoVault/CardMirror (set CARD_MIRROR_DEST_LINUX or DEST_ROOT)
+# Linux defaults:  /mnt/PhotoVault/CardMirror (override — use your NAS *share* mount path)
+#
+# DEST_ROOT is always a locally mounted path (travel SSD or NAS shared folder), never “the server”.
 #
 # Examples (uncomment one):
-# DEST_ROOT="/Volumes/Extreme SSD/PhotoVault/CardMirror"   # macOS travel
-# DEST_ROOT="/Volumes/Photos/PhotoVault/CardMirror"        # macOS home NAS mount
-# DEST_ROOT="/mnt/nas/PhotoVault/CardMirror"             # Ubuntu media server → NAS
-# CARD_MOUNT_ROOTS="/media/amodig:/run/media/amodig"       # Linux card search paths (colon-separated)
+# DEST_ROOT="/Volumes/Extreme SSD/PhotoVault/CardMirror"   # macOS travel SSD
+# DEST_ROOT="/Volumes/Photos/PhotoVault/CardMirror"        # macOS: NAS share mount
+# DEST_ROOT="/mnt/photos/PhotoVault/CardMirror"          # Ubuntu: NAS share mount (CIFS/NFS)
+# CARD_MOUNT_ROOTS="/media/amodig:/run/media/amodig"       # Linux SD card search paths
 
 # KEEP_DAYS=90
 # FAST_MODE=1

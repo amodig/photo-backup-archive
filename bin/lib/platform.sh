@@ -7,7 +7,7 @@ platform_os() { uname -s 2>/dev/null || echo unknown; }
 platform_default_dest_root() {
   case "$(platform_os)" in
     Darwin) echo "/Volumes/Extreme SSD/PhotoVault/CardMirror" ;;
-    Linux)  echo "${CARD_MIRROR_DEST_LINUX:-/mnt/PhotoVault/CardMirror}" ;;
+    Linux)  echo "${CARD_MIRROR_DEST_LINUX:-/mnt/PhotoVault/CardMirror}" ;; # NAS share mount path on this host
     *)      echo "${HOME}/PhotoVault/CardMirror" ;;
   esac
 }

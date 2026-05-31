@@ -3,90 +3,83 @@ name: card-mirror-transfer-path
 description: >-
   Advises the fastest path for camera SD card backups (travel SSD vs home NAS)
   using card-mirror.sh on macOS or Ubuntu Linux. Infers home vs travel from mounts.
-  Use when backing up a memory card, mirroring DCIM, running card-mirror remotely
-  on a media server, choosing DEST_ROOT, or diagnosing slow rsync.
+  Use when backing up a memory card, mirroring DCIM, running card-mirror on a Ubuntu
+  host with a NAS share mounted, choosing DEST_ROOT, or diagnosing slow rsync.
 ---
 
 # Card mirror — fastest transfer path
 
-Before starting or recommending `card-mirror.sh`, **detect host OS and mounts**, then **home vs travel**. Ask the user only when ambiguous. State `DEST_ROOT`, fastest physical path, and whether to proceed.
+Before starting or recommending `card-mirror.sh`, **detect host OS and mounts**, then **home vs travel**. Ask only when ambiguous.
 
-Scripts run on **macOS** and **Linux** (bash). **Prefer the Ubuntu media server** with Ethernet to NAS when the card reader can plug in there.
+**Important:** The **media server is not mounted** — only volumes are: the **SD card** (source) and the **NAS shared folder** (`DEST_ROOT`). On Ubuntu, `DEST_ROOT` is wherever PhotoVault (or equivalent) is mounted via CIFS/NFS.
+
+Scripts run on **macOS** and **Linux** (bash). **Prefer the Ubuntu host** with the card reader + NAS share on Ethernet when at home.
 
 ## Path priority (fastest first)
 
 | Rank | Setup | Typical bottleneck |
 |------|--------|-------------------|
-| 1 | **SD reader on Ubuntu media server** → Ethernet → NAS (local `DEST_ROOT`) | NAS/disk; often 50–100+ MB/s |
-| 2 | **Mac on Ethernet** → NAS via **SMB3** | LAN; much better than Wi‑Fi AFP |
-| 3 | **Mac on Wi‑Fi** → NAS via AFP/SMB | Network (~15–25 MB/s common) |
-| 4 | **Mac / travel** → rugged SSD (`Extreme SSD`) | USB; offline-friendly |
+| 1 | **SD on Ubuntu host** → write to **locally mounted NAS share** | NAS/disk; often 50–100+ MB/s |
+| 2 | **Mac Ethernet** → NAS share via SMB3 | LAN |
+| 3 | **Mac Wi‑Fi** → NAS share via AFP/SMB | ~15–25 MB/s |
+| 4 | **Travel** → rugged SSD (`Extreme SSD`) | USB; offline |
 
-**Avoid** routing a full card through Mac Wi‑Fi + AFP when the media server can take the card directly.
+## Mount model
 
-## Detect host and mounts
+| Role | macOS | Ubuntu host |
+|------|--------|-------------|
+| Card (source) | `/Volumes/<CARD_ID>` | `/media/$USER/<CARD_ID>` |
+| Archive (`DEST_ROOT`) | NAS **share** `/Volumes/Photos/PhotoVault/CardMirror` | NAS **share** e.g. `/mnt/photos/PhotoVault/CardMirror` |
+
+Do not treat the media server hostname as a mount point — only the NAS export path matters for `DEST_ROOT`.
+
+## Detect mounts
 
 ### macOS
 
 ```bash
 ls /Volumes
 test -d "/Volumes/Extreme SSD/PhotoVault/CardMirror" && echo travel_dest_ok
-test -d "/Volumes/Photos/PhotoVault/CardMirror" && echo home_dest_ok
-mount | grep -E 'Photos|Extreme SSD'
+test -d "/Volumes/Photos/PhotoVault/CardMirror" && echo nas_share_ok
 ```
 
-### Ubuntu Linux (media server)
+### Ubuntu (NAS share + card only)
 
 ```bash
-uname -s   # Linux
 ls /media/$USER /run/media/$USER 2>/dev/null
-test -d "/mnt/nas/PhotoVault/CardMirror" && echo nas_dest_ok   # example DEST_ROOT
-findmnt -T "$DEST_ROOT" 2>/dev/null || true
-# Card with DCIM: /media/$USER/A2408A or pass path explicitly
+test -d "$DEST_ROOT" && findmnt -T "$DEST_ROOT"    # should show cifs/nfs, not “server”
 ```
 
-Set on the server in `config/config.sh`: `DEST_ROOT` = NAS mount path; optional `CARD_MOUNT_ROOTS="/media/user:/run/media/user"`.
+Set in `config/config.sh`: `DEST_ROOT` = **NAS share mount** on this machine; optional `CARD_MOUNT_ROOTS`.
 
 ## Home vs travel inference
 
 | Signal | Scenario | `DEST_ROOT` |
 |--------|----------|-------------|
-| **Linux host** + NAS path exists + card under `/media/...` | **Home (optimal)** | Server NAS mount, e.g. `/mnt/nas/PhotoVault/CardMirror` |
-| **Extreme SSD** mounted (writable `CardMirror`) | **Travel** | `/Volumes/Extreme SSD/PhotoVault/CardMirror` — **even if NAS also mounted** |
-| **Photos** NAS mounted on Mac, no Extreme SSD | **Home (Mac)** | `/Volumes/Photos/PhotoVault/CardMirror` |
-| Both Extreme SSD + Photos on Mac | **Travel** | Prefer **Extreme SSD**; NAS optional later |
-| Neither destination | **Unknown** | Ask; suggest SSD or mount NAS |
+| **Linux** + NAS share mounted + card in `/media/...` | **Home (optimal)** | User’s NAS share path (from config) |
+| **Extreme SSD** mounted on Mac | **Travel** | `/Volumes/Extreme SSD/PhotoVault/CardMirror` (even if NAS share also mounted) |
+| **Photos** share on Mac, no Extreme SSD | **Home (Mac)** | `/Volumes/Photos/PhotoVault/CardMirror` |
+| Neither SSD nor NAS share path ready | **Unknown** | Ask; plug SSD or mount NAS share |
 
-Do **not** ask home vs travel when **Extreme SSD** is mounted on Mac. On **Linux media server**, default to NAS `DEST_ROOT` when configured.
-
-## Pre-flight checklist
-
-```
-Host: [macOS | Linux]
-Scenario: [travel | home-mac | home-linux] — [evidence]
-DEST_ROOT: [path]
-- [ ] Fastest route (media server / Ethernet SMB / travel SSD)?
-- [ ] Card ID: {OwnerInitial}{YYMM}{Sequence}?
-- [ ] No duplicate rsync running?
-```
+On **Linux at home**, use NAS share `DEST_ROOT` from config — not Mac paths.
 
 ## Commands
 
-**macOS (NAS from Mac):**
+**Ubuntu host (preferred at home):**
+
+```bash
+DEST_ROOT="/mnt/photos/PhotoVault/CardMirror" DRY_RUN=1 \
+  ./bin/card-mirror.sh "/media/$USER/A2408A"
+```
+
+**macOS NAS share:**
 
 ```bash
 DEST_ROOT="/Volumes/Photos/PhotoVault/CardMirror" DRY_RUN=1 \
   ./bin/card-mirror.sh "/Volumes/A2408A"
 ```
 
-**Ubuntu media server (preferred at home):**
-
-```bash
-DEST_ROOT="/mnt/nas/PhotoVault/CardMirror" DRY_RUN=1 \
-  ./bin/card-mirror.sh "/media/$USER/A2408A"
-```
-
-**Travel (macOS default):**
+**macOS travel:**
 
 ```bash
 ./bin/card-mirror.sh "/Volumes/A2408A"
@@ -94,22 +87,14 @@ DEST_ROOT="/mnt/nas/PhotoVault/CardMirror" DRY_RUN=1 \
 
 ## Card naming
 
-**Pattern:** `{OwnerInitial}{YYMM}{Sequence}` — owner initial, earliest photo month, sequence letter if duplicate month.
+`{OwnerInitial}{YYMM}{Sequence}` — macOS: `diskutil rename`; Linux: `CARD_ID.txt` on card or existing label under `/media/...`.
 
-- macOS rename: `diskutil rename "/Volumes/Old" "A2408A"`
-- Linux: label when formatting, or pass mount path; `CARD_ID.txt` on card: `CARD_ID=A2408A`
+## This setup
 
-## Bottleneck diagnosis
+| Host | `DEST_ROOT` |
+|------|-------------|
+| macOS travel | `/Volumes/Extreme SSD/PhotoVault/CardMirror` |
+| macOS home | `/Volumes/Photos/PhotoVault/CardMirror` (NAS **share** via AFP/SMB) |
+| Ubuntu home | User’s NAS **share** mount (configure in `config/config.sh`; not `/Volumes/...`) |
 
-| Host | Check |
-|------|--------|
-| macOS | `mount` — prefer `smbfs` over `afpfs`; `route -n get default` |
-| Linux | `findmnt`; `ip route`; local NAS mount vs network |
-| Both | rsync throughput; `du` on `DEST_ROOT/<CARD_ID>`; `iostat` / SD removable |
-
-## Backup destinations (this setup)
-
-| When | macOS `DEST_ROOT` | Linux media server `DEST_ROOT` |
-|------|-------------------|--------------------------------|
-| Travel | `/Volumes/Extreme SSD/PhotoVault/CardMirror` | N/A (use Mac or portable host) |
-| Home | `/Volumes/Photos/PhotoVault/CardMirror` (slow over Wi‑Fi AFP) | `/mnt/nas/PhotoVault/CardMirror` (example — use your NAS mount) |
+Prefer Ubuntu + mounted NAS share over Mac Wi‑Fi AFP for large card mirrors.

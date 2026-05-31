@@ -19,22 +19,34 @@ Scripts default to a **portable rugged SSD** volume named `Extreme SSD` — a co
 | Context | Typical `DEST_ROOT` | Notes |
 |---------|---------------------|--------|
 | **Travel / field** | `/Volumes/Extreme SSD/PhotoVault/CardMirror` | Default in scripts; fast local USB; works offline |
-| **Home / NAS** | `/Volumes/Photos/PhotoVault/CardMirror` | Network share; prefer Ethernet + SMB; see transfer-path skill |
+| **Home / NAS** | `/Volumes/Photos/PhotoVault/CardMirror` | macOS: mounted **NAS shared folder** (not “the server”) |
+| **Home / NAS (Ubuntu host)** | `/path/to/nas-share/PhotoVault/CardMirror` | Linux: same — only the **NAS share** is mounted locally |
 
 The same `CardMirror/<CARD_ID>/` layout is used on both targets so card IDs stay consistent whether you mirror on the road or at home. Override `DEST_ROOT` in `config/config.sh` or per run — do not commit machine-specific paths unless this repo is personal-only.
 
 **If both the travel SSD and NAS are mounted**, prefer mirroring to the travel SSD first (fast local USB); sync or copy to the NAS separately when convenient.
 
+### What is mounted (not the media server host)
+
+You do **not** mount the media server machine as a volume. You mount:
+
+| Role | macOS | Ubuntu media server |
+|------|--------|---------------------|
+| **Source** (SD card) | `/Volumes/A2408A` | `/media/$USER/A2408A` (or `/run/media/...`) |
+| **Destination** (`DEST_ROOT`) | NAS **share** e.g. `/Volumes/Photos/...` | NAS **share** e.g. `/mnt/photos/...` (your CIFS/NFS mount) |
+
+The Ubuntu box is just the host on Ethernet; `DEST_ROOT` must be the path where the **PhotoVault share** is already mounted.
+
 ### Ubuntu media server (fastest home path)
 
-Plug the card reader into the **Linux media server** on Ethernet and run the same scripts there. The server writes directly to the NAS mount (no Mac Wi‑Fi hop).
+Plug the card reader into the **Ubuntu host** and mirror into the locally mounted NAS share (no Mac Wi‑Fi hop).
 
 ```bash
-# On the media server — set paths in config/config.sh first
-DEST_ROOT="/mnt/nas/PhotoVault/CardMirror" ./bin/card-mirror.sh /media/$USER/A2408A
+# DEST_ROOT = where the NAS shared folder is mounted on this machine (set in config/config.sh)
+DEST_ROOT="/mnt/photos/PhotoVault/CardMirror" ./bin/card-mirror.sh /media/$USER/A2408A
 ```
 
-Auto-detect scans `/media/$USER/*` and `/run/media/$USER/*` (override with `CARD_MOUNT_ROOTS`). **launchd automation is macOS only.**
+Auto-detect scans `/media/$USER/*` and `/run/media/$USER/*` for the card (override with `CARD_MOUNT_ROOTS`). **launchd automation is macOS only.**
 
 ## Directory Structure
 
