@@ -69,12 +69,23 @@ platform_is_card_fs "$SRC" || die "Not a FAT/exFAT mount: $SRC"
 
 earliest_exif() {
   local dcim="$1"
+  # Stills only (skip MOV/MP4 — huge and rarely define card "earliest photo" month).
+  local -a exts=(JPG JPEG RW2 ORF ARW CR2 CR3 NEF HEIC TIF TIFF)
+  local -a ext_args=()
+  local e
+
   if command -v exiftool >/dev/null 2>&1; then
-    exiftool -T -DateTimeOriginal -d %Y%m -ext JPG -ext jpg -ext ORF -ext orf \
-      -ext RW2 -ext ARW -ext CR2 -ext CR3 -ext NEF -ext HEIC -ext MOV -ext MP4 \
-      -r "$dcim" 2>/dev/null | sort -n | head -1
+    for e in "${exts[@]}"; do
+      ext_args+=(-ext "$e" -ext "${e,,}")
+    done
+    echo "Scanning EXIF for earliest photo (large cards: 1–3 min)..." >&2
+    set +o pipefail
+    exiftool -progress -fast2 -T -DateTimeOriginal -d %y%m "${ext_args[@]}" -r "$dcim" \
+      | grep -E '^[0-9]{4}$' | sort -n | head -1
+    set -o pipefail
     return
   fi
+  echo "Scanning EXIF (Pillow, JPEG only)..." >&2
   python3 - "$dcim" <<'PY'
 import sys
 from pathlib import Path
