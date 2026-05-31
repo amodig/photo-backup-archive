@@ -10,6 +10,14 @@ LOG_TAG="card-automount"
 
 log() { logger -t "$LOG_TAG" "$*"; echo "[${LOG_TAG}] $*"; }
 
+# udev %E{ID_FS_LABEL} escapes spaces/special chars (e.g. \x20) — decode before path use.
+decode_udev_label() {
+  python3 - "$1" <<'PY'
+import sys
+print(sys.argv[1].encode("utf-8").decode("unicode_escape"))
+PY
+}
+
 need_mount_user() {
   [[ -n "$MOUNT_USER" ]] || {
     log "MOUNT_USER unset — re-run: sudo ./bin/install-linux-card-mount.sh"
@@ -44,7 +52,7 @@ mount_dev() {
   gid="$(id -g "$MOUNT_USER" 2>/dev/null || echo 1000)"
 
   mkdir -p "$mountpoint"
-  mount -o "uid=${uid},gid=${gid},umask=022,errors=remount-ro" "$node" "$mountpoint"
+  mount -o "uid=${uid},gid=${gid},umask=022" "$node" "$mountpoint"
 
   if [[ ! -d "$mountpoint/DCIM" && ! -d "$mountpoint/PRIVATE" && ! -d "$mountpoint/AVCHD" ]]; then
     umount "$mountpoint" 2>/dev/null || true
@@ -74,6 +82,7 @@ umount_by_label() {
   local mountpoint
 
   need_mount_user
+  label="$(decode_udev_label "$label")"
   mountpoint="${MOUNT_ROOT}/${label}"
   [[ -d "$mountpoint" ]] || { log "no mountpoint for label $label"; exit 0; }
   findmnt -n "$mountpoint" >/dev/null 2>&1 || { log "not mounted: $mountpoint"; exit 0; }

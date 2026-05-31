@@ -2,11 +2,13 @@
 # Installed by: ./bin/install-linux-card-mount.sh
 #
 # Mounts to /media/<user>/<LABEL> — matches CARD_MOUNT_ROOTS in config/config.sh.
+#
+# KERNEL covers USB readers (sdXn) and built-in MMC slots (mmcblk0p1).
 
-ACTION=="add", SUBSYSTEM=="block", KERNEL=="sd[a-z][0-9]*", \
-  ENV{ID_BUS}=="usb|mmc", ENV{ID_FS_TYPE}=="exfat|vfat", ENV{ID_FS_LABEL}!="", \
+ACTION=="add", SUBSYSTEM=="block", KERNEL=="sd[a-z][0-9]*|mmcblk[0-9]p[0-9]*", \
+  ENV{ID_BUS}=="usb|mmc", ENV{ID_FS_TYPE}=="exfat|vfat|msdos|fat", ENV{ID_FS_LABEL}!="", \
   RUN+="/usr/bin/systemd-run --no-block --quiet /usr/local/sbin/card-automount.sh add %k"
 
-ACTION=="remove", SUBSYSTEM=="block", KERNEL=="sd[a-z][0-9]*", \
+ACTION=="remove", SUBSYSTEM=="block", KERNEL=="sd[a-z][0-9]*|mmcblk[0-9]p[0-9]*", \
   ENV{ID_BUS}=="usb|mmc", ENV{ID_FS_LABEL}!="", \
   RUN+="/usr/bin/systemd-run --no-block --quiet /usr/local/sbin/card-automount.sh remove-by-label %E{ID_FS_LABEL}"
