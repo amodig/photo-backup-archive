@@ -63,7 +63,7 @@ When `DEST_ROOT` is on **NFS/SMB**, `card-mirror.sh` automatically adds `--no-ow
 On a headless media server, install packages once:
 
 ```bash
-sudo apt install rsync util-linux exfatprogs libimage-exiftool-perl
+sudo apt install rsync util-linux exfatprogs libimage-exiftool-perl python3
 ```
 
 | Package | Used for |
@@ -72,6 +72,7 @@ sudo apt install rsync util-linux exfatprogs libimage-exiftool-perl
 | `util-linux` | `findmnt`, `lsblk` — mount detection |
 | `exfatprogs` | exFAT cards (`exfatlabel` to rename volume to `CARD_ID`; kernel exFAT mount) |
 | `libimage-exiftool-perl` | `card-label.sh` — earliest photo date from EXIF (JPEG, ORF, etc.) |
+| `python3` | `card-automount.sh` — decode udev-escaped volume labels on unmount |
 
 Optional: `python3-pil` — JPEG-only fallback if `exiftool` is not installed. Mount the NAS **share** separately (e.g. `nfs-common` + `/etc/fstab` entry for `/mnt/photos`).
 

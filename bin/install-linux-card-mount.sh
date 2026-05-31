@@ -25,6 +25,11 @@ need_root
 
 [[ -f "$LINUX_CFG/card-automount.sh" ]] || { echo "Missing $LINUX_CFG/card-automount.sh" >&2; exit 1; }
 
+command -v python3 >/dev/null 2>&1 || {
+  echo "Install python3 (used by card-automount label decode): sudo apt install python3" >&2
+  exit 1
+}
+
 echo "Installing headless card automount for user: $MOUNT_USER"
 
 install -m 0755 "$LINUX_CFG/card-automount.sh" /usr/local/sbin/card-automount.sh

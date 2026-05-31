@@ -255,21 +255,15 @@ fi
 command -v exfatlabel >/dev/null 2>&1 || die "Install exfatprogs: sudo apt install exfatprogs"
 [[ -n "$DEV" ]] || die "Could not resolve block device for $SRC"
 
-echo "Renaming volume to $CARD_ID (umount required)..."
-if findmnt -n "$SRC" >/dev/null 2>&1; then
-  udisksctl unmount -b "/dev/$DEV" 2>/dev/null || umount "$SRC"
-fi
+echo ""
+echo "To rename the volume to $CARD_ID:"
+echo "  udisksctl unmount -b /dev/$DEV"
+echo "  sudo exfatlabel /dev/$DEV $CARD_ID"
+echo "  udisksctl mount -b /dev/$DEV"
+echo ""
+echo "CARD_ID.txt is on the card — card-mirror.sh will use it even before relabel."
 
-if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
-  echo ""
-  echo "Run these commands to finish the rename:"
-  echo "  sudo exfatlabel /dev/$DEV $CARD_ID"
-  echo "  udisksctl mount -b /dev/$DEV"
-  echo ""
-  echo "CARD_ID.txt is already on the card — card-mirror.sh will use it even before relabel."
-  exit 0
+if [[ "${EUID:-$(id -u)}" -eq 0 ]] && ! findmnt -n "/dev/$DEV" >/dev/null 2>&1; then
+  exfatlabel "/dev/$DEV" "$CARD_ID"
+  echo "Renamed /dev/$DEV → $CARD_ID (device was already unmounted)."
 fi
-
-exfatlabel "/dev/$DEV" "$CARD_ID"
-echo "Renamed /dev/$DEV → $CARD_ID"
-echo "Mount again: udisksctl mount -b /dev/$DEV"
