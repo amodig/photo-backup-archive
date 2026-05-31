@@ -140,10 +140,190 @@ platform_format_mtime() {
   esac
 }
 
-platform_rsync_progress_flag() {
-  if rsync --info=help 2>&1 | grep -q 'progress2'; then
+platform_rsync_info_flags() {
+  # Used only when SHOW_PROGRESS=0 (otherwise rsync stays quiet; script logs progress).
+  if rsync --info=help 2>&1 | grep -q 'stats2'; then
+    echo --info=stats2
+  elif rsync --info=help 2>&1 | grep -q 'progress2'; then
     echo --info=progress2
   else
     echo --progress
   fi
+}
+
+platform_format_eta() {
+  local sec="$1"
+  (( sec < 0 )) && sec=0
+  printf '%d:%02d:%02d' $((sec / 3600)) $(((sec % 3600) / 60)) $((sec % 60))
+}
+
+# True while pid exists and is not a zombie (rsync may exit before bash reaps it).
+platform_pid_running() {
+  local pid="$1" st
+  [[ -n "$pid" ]] || return 1
+  st=$(ps -p "$pid" -o state= 2>/dev/null) || return 1
+  st=${st// /}
+  [[ -n "$st" && "$st" != "Z" ]]
+}
+
+# Set PLATFORM_MIRROR_TICK_MSG and return 0 when a new line should be logged; 1 if skipped.
+# Must be called without command substitution — $(...) runs in a subshell and drops state updates.
+platform_mirror_progress_tick() {
+  local dest="$1" src_kb="$2" src_label="$3" interval="$4"
+  local -n _state="$5" # nameref: last_kb last_time last_emit last_pct preparing
+
+  local now dest_kb dest_label pct rate_kb eta_sec
+  PLATFORM_MIRROR_TICK_MSG=""
+  now=$(date +%s)
+  interval="${interval:-15}"
+  [[ "$interval" =~ ^[0-9]+$ ]] && (( interval >= 1 )) || interval=15
+
+  if (( _state[last_emit] > 0 && now < _state[last_emit] + interval )); then
+    return 1
+  fi
+
+  dest_kb="$(du -sk "$dest" 2>/dev/null | awk '{print $1}')"
+  dest_kb="${dest_kb:-0}"
+  dest_label="$(platform_format_dest_kb "$dest_kb")"
+
+  if (( dest_kb == 0 )); then
+    if (( _state[preparing] == 0 )); then
+      _state[preparing]=1
+      _state[last_emit]=$now
+      PLATFORM_MIRROR_TICK_MSG="building file list / starting…"
+      return 0
+    fi
+    return 1
+  fi
+
+  src_kb="${src_kb//[!0-9]/}"
+  src_kb="${src_kb:-0}"
+
+  pct=0
+  if (( src_kb > 0 )); then
+    pct=$((dest_kb * 100 / src_kb))
+    (( pct > 100 )) && pct=100
+  fi
+
+  if (( pct < _state[last_pct] )); then
+    return 1
+  fi
+  if (( pct == _state[last_pct] && _state[last_pct] >= 0 )); then
+    return 1
+  fi
+
+  PLATFORM_MIRROR_TICK_MSG="${dest_label} / ${src_label} (~${pct}%)"
+  if (( _state[last_kb] > 0 && _state[last_time] > 0 && dest_kb > _state[last_kb] && now > _state[last_time] )); then
+    rate_kb=$(( (dest_kb - _state[last_kb]) / (now - _state[last_time]) ))
+    if (( rate_kb > 0 && dest_kb < src_kb )); then
+      eta_sec=$(( (src_kb - dest_kb) / rate_kb ))
+      PLATFORM_MIRROR_TICK_MSG+=" | ~$((rate_kb / 1024)) MB/s | ETA $(platform_format_eta "$eta_sec")"
+    fi
+  fi
+
+  _state[last_kb]=$dest_kb
+  _state[last_time]=$now
+  _state[last_emit]=$now
+  _state[last_pct]=$pct
+  if (( pct >= 99 && _state[finalize_started] == 0 )); then
+    _state[finalize_started]=$now
+  fi
+  return 0
+}
+
+# Human-readable size from du -sk kilobytes.
+platform_format_dest_kb() {
+  local dest_kb="$1"
+  if (( dest_kb >= 1048576 )); then
+    awk "BEGIN { printf \"%.0fG\", ${dest_kb}/1048576 }"
+  elif (( dest_kb >= 1024 )); then
+    awk "BEGIN { printf \"%.0fM\", ${dest_kb}/1024 }"
+  else
+    echo "${dest_kb}K"
+  fi
+}
+
+# Periodic status while rsync is still running after disk size ~100%. Sets PLATFORM_MIRROR_TICK_MSG.
+platform_mirror_finalize_heartbeat() {
+  local dest="$1" src_label="$2" interval="$3"
+  local -n _state="$4"
+
+  local now dest_kb dest_label elapsed
+  PLATFORM_MIRROR_TICK_MSG=""
+  now=$(date +%s)
+  interval="${interval:-15}"
+  [[ "$interval" =~ ^[0-9]+$ ]] && (( interval >= 1 )) || interval=15
+
+  if (( _state[last_finalize_emit] > 0 && now < _state[last_finalize_emit] + interval )); then
+    return 1
+  fi
+
+  dest_kb="$(du -sk "$dest" 2>/dev/null | awk '{print $1}')"
+  dest_kb="${dest_kb:-0}"
+  dest_label="$(platform_format_dest_kb "$dest_kb")"
+
+  elapsed=0
+  if (( _state[finalize_started] > 0 )); then
+    elapsed=$((now - _state[finalize_started]))
+  fi
+
+  PLATFORM_MIRROR_TICK_MSG="Finalizing rsync: ${dest_label} / ${src_label}"
+  if (( elapsed > 0 )); then
+    PLATFORM_MIRROR_TICK_MSG+=" (${elapsed}s)"
+  fi
+  PLATFORM_MIRROR_TICK_MSG+="…"
+
+  _state[last_finalize_emit]=$now
+  return 0
+}
+
+# True if a relative path should appear in .manifest-last.txt (matches card-mirror filters).
+platform_manifest_include_rel() {
+  local rel="$1" attic="$2" rejected="$3"
+  [[ "$rel" == "${attic}" || "$rel" == "${attic}"/* ]] && return 1
+  [[ "$rel" == "${rejected}" || "$rel" == "${rejected}"/* ]] && return 1
+  [[ "$rel" != */* && "$rel" == .* ]] && return 1
+  return 0
+}
+
+# Build sorted manifest; logs scan/sort progress every interval seconds. Sets PLATFORM_MANIFEST_COUNT.
+platform_build_card_manifest() {
+  local dest="$1" manifest="$2" attic="$3" rejected="$4" interval="$5"
+  local tmp count now last_emit rel
+  tmp="${manifest}.tmp.$$"
+  count=0
+  last_emit=0
+  interval="${interval:-15}"
+  [[ "$interval" =~ ^[0-9]+$ ]] && (( interval >= 1 )) || interval=15
+
+  : >"$tmp"
+  while IFS= read -r -d '' f; do
+    rel="${f#"${dest}/"}"
+    platform_manifest_include_rel "$rel" "$attic" "$rejected" || continue
+    printf '%s\n' "$rel" >>"$tmp"
+    count=$((count + 1))
+    now=$(date +%s)
+    if (( last_emit == 0 || now >= last_emit + interval )); then
+      echo "MANIFEST_PROGRESS:scanned ~${count} files…"
+      last_emit=$now
+    fi
+  done < <(
+    find "$dest" -type f \
+      ! -name '._*' ! -name '.DS_Store' \
+      -print0 2>/dev/null
+  )
+
+  echo "MANIFEST_PROGRESS:sorting ~${count} paths…"
+  sort -o "$manifest" "$tmp"
+  rm -f "$tmp"
+  echo "MANIFEST_COUNT:${count}"
+}
+
+platform_measure_source() {
+  local src="$1"
+  local count size_kb size_h
+  count="$(find "$src" -type f ! -name '._*' ! -name '.DS_Store' 2>/dev/null | wc -l | tr -d ' ')"
+  size_kb="$(du -sk "$src" 2>/dev/null | awk '{print $1}')"
+  size_h="$(du -sh "$src" 2>/dev/null | awk '{print $1}')"
+  printf '%s\t%s\t%s\n' "${size_kb:-0}" "${size_h:-?}" "${count:-0}"
 }

@@ -11,6 +11,8 @@
 # DEST_ROOT="/mnt/photos/PhotoVault/CardMirror"          # Ubuntu: NAS share mount (CIFS/NFS)
 # CARD_MOUNT_ROOTS="/media/amodig:/run/media/amodig"       # Linux SD card search paths
 
+# SHOW_PROGRESS=1
+# PROGRESS_INTERVAL=10
 # KEEP_DAYS=90
 # FAST_MODE=1
 # DRY_RUN=0
