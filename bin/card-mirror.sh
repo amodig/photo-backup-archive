@@ -1,82 +1,76 @@
-#!/bin/zsh
+#!/usr/bin/env bash
 #
 # card-mirror.sh — Fast per-card mirror with Attic (quarantine) + tombstones + manifest
-# Mirrors a card to CardMirror/<CardID>/, moves deletions/overwrites into Attic/YYYY-MM-DD/.
+# Mirrors a card to CardMirror/<CardID>/, moves deletions/overwrites into Attic/.
 # Supports per-card .tombstones (exclude list) so NAS-side culls won't be re-copied from the card.
 #
 set -euo pipefail
-setopt EXTENDED_GLOB NO_CASE_GLOB
 IFS=$'\n\t'
 
-# Script directory and repo root for config loading
-SCRIPT_DIR="$(cd -- "$(dirname "$0")" >/dev/null 2>&1 ; pwd -P)"
+SCRIPT_DIR="$(cd -- "$(dirname "$0")" >/dev/null 2>&1 && pwd -P)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd -P)"
+# shellcheck source=lib/platform.sh
+source "$SCRIPT_DIR/lib/platform.sh"
 
-# Load optional config overrides
 [[ -f "$REPO_ROOT/config/config.sh" ]] && source "$REPO_ROOT/config/config.sh"
 
-# Set defaults (can be overridden by config or environment)
-: "${DEST_ROOT:="/Volumes/Extreme SSD/PhotoVault/CardMirror"}"
+: "${DEST_ROOT:=$(platform_default_dest_root)}"
 : "${KEEP_DAYS:=90}"
-: "${FAST_MODE:=1}"  # Adds -W --omit-dir-times for speed on local disks
-: "${DRY_RUN:=0}"    # DRY_RUN=1 to see what would happen
-: "${ATTIC_FOLDER:="_Attic"}"    # Name of quarantine folder
-: "${REJECTED_FOLDER:="_Rejected"}"  # Name of photo culling folder
+: "${FAST_MODE:=1}"
+: "${DRY_RUN:=0}"
+: "${ATTIC_FOLDER:="_Attic"}"
+: "${REJECTED_FOLDER:="_Rejected"}"
 
 timestamp() { date "+%Y-%m-%d %H:%M:%S"; }
 log() { echo "[$(timestamp)] $*"; }
 die() { echo "[$(timestamp)] ERROR: $*" >&2; exit 1; }
 
-# Verify destination is accessible (create parent if needed)
 if [[ ! -d "$DEST_ROOT" ]]; then
   log "Destination not found, attempting to create: $DEST_ROOT"
   mkdir -p "$DEST_ROOT" || die "Cannot create destination: $DEST_ROOT"
 fi
 need() { command -v "$1" >/dev/null 2>&1 || die "Missing '$1'"; }
 need rsync
+case "$(platform_os)" in
+  Darwin) need diskutil ;;
+  Linux)
+    need findmnt
+    command -v lsblk >/dev/null 2>&1 || log "Note: lsblk not found; removable detection may be weaker"
+    ;;
+esac
 
-# --- Detect source (card) ---
-# Only consider EXTERNAL/REMOVABLE camera-like FAT/exFAT volumes; skip destination drive
 SRC="${1:-}"
-# Get destination volume root to avoid mirroring to same drive
-# Try to get the actual volume mount point, fallback to path-based detection
-dest_vol_root=""
-if [[ "$DEST_ROOT" == /Volumes/* ]]; then
-  dest_vol_root="$(echo "$DEST_ROOT" | cut -d/ -f1-3)"  # /Volumes/VolumeName
-else
-  dest_vol_root="$(dirname "$(dirname "$DEST_ROOT")")"  # fallback
-fi
-is_external() { diskutil info "$1" 2>/dev/null | grep -E "External:\s*Yes|Device Location:\s*External|Removable Media:\s*Yes" >/dev/null; }
-is_camera_tree() { [[ -d "$1/DCIM" || -d "$1/PRIVATE" || -d "$1/AVCHD" ]]; }
-is_card_fs() { diskutil info "$1" 2>/dev/null | grep -E "File System Personality:\s*(ExFAT|MS-DOS \(FAT[0-9]*\))" >/dev/null; }
+dest_vol_root="$(platform_dest_volume_root "$DEST_ROOT")"
 
 if [[ -z "${SRC}" ]]; then
   candidates=()
-  for v in /Volumes/*; do
-    [[ -d "$v" ]] || continue
-    [[ "$v" == "$dest_vol_root" ]] && continue
-    [[ "$(basename "$v")" == "Macintosh HD" ]] && continue
-    is_external "$v" || continue
-    is_camera_tree "$v" || continue
-    is_card_fs "$v" || continue
+  mounts=()
+  platform_collect_card_mounts mounts "$dest_vol_root"
+  for v in "${mounts[@]}"; do
+    platform_is_external_removable "$v" || continue
+    platform_is_camera_tree "$v" || continue
+    platform_is_card_fs "$v" || continue
     candidates+=("$v")
   done
 
-  if (( ${#candidates[@]} == 0 )); then
-    die "No external camera card found. Pass the source explicitly, e.g. /Volumes/SD-A01"
-  elif (( ${#candidates[@]} > 1 )); then
+  if ((${#candidates[@]} == 0)); then
+    case "$(platform_os)" in
+      Darwin) die "No external camera card found. Pass the source explicitly, e.g. /Volumes/A2408A" ;;
+      Linux)  die "No external camera card found. Pass the source explicitly, e.g. /media/${USER}/A2408A" ;;
+      *)      die "No external camera card found. Pass the source path as the first argument." ;;
+    esac
+  elif ((${#candidates[@]} > 1)); then
     echo "Multiple card-like volumes found:"
     for c in "${candidates[@]}"; do echo "  - $c"; done
     die "Please run again with an explicit source path."
   else
-    SRC="${candidates[1]:-}"; [[ -n "$SRC" ]] || die "Internal error: empty candidate after detection"
+    SRC="${candidates[0]}"
     log "Auto-detected source: $SRC"
   fi
 fi
 
 [[ -n "${SRC}" && -d "${SRC}" ]] || die "Source not found: $SRC"
 
-# Prefer stable ID from CARD_ID.txt if present; else use volume label
 CARD_LABEL="$(basename "$SRC")"
 if [[ -f "$SRC/CARD_ID.txt" ]]; then
   CARD_ID="$(awk -F= '/^CARD_ID=/{print $2}' "$SRC/CARD_ID.txt" | tr -d '\r\n')"
@@ -84,63 +78,50 @@ if [[ -f "$SRC/CARD_ID.txt" ]]; then
 else
   CARD_ID="$CARD_LABEL"
 fi
-CARD_ID="${CARD_ID//[^A-Za-z0-9._-]/-}"   # sanitize
+CARD_ID="${CARD_ID//[^A-Za-z0-9._-]/-}"
 
 DEST="$DEST_ROOT/$CARD_ID"
 ATTIC="$DEST/$ATTIC_FOLDER"
 mkdir -p "$DEST" "$ATTIC"
 
-# Marker file
 if [[ ! -f "$DEST/CARD_ID.txt" ]]; then
   { echo "CARD_ID=$CARD_ID"; echo "Created=$(date -u +%FT%TZ)"; } > "$DEST/CARD_ID.txt"
 fi
 
-# --- Rsync mirror with Attic and tombstones ---
 log "Mirroring from '$SRC'  →  '$DEST'"
 log "Quarantining deletes/overwrites to: $ATTIC"
 
-# Record deletion discovery in log file
 ATTIC_LOG="$ATTIC/.deletion-log.txt"
 if [[ -f "$DEST/.manifest-last.txt" ]]; then
-  # Get date when files were last confirmed present  
-  if [[ "$OSTYPE" == "darwin"* ]]; then
-    LAST_MANIFEST_DATE=$(date -r $(stat -f %m "$DEST/.manifest-last.txt" 2>/dev/null || echo 0) +%Y-%m-%d 2>/dev/null || echo "unknown")
-  else
-    LAST_MANIFEST_DATE=$(date -d @$(stat -c %Y "$DEST/.manifest-last.txt" 2>/dev/null || echo 0) +%Y-%m-%d 2>/dev/null || echo "unknown")
-  fi
+  LAST_MANIFEST_DATE="$(platform_format_mtime "$(platform_manifest_mtime "$DEST/.manifest-last.txt")" | cut -d' ' -f1)"
   echo "[$(date '+%Y-%m-%d %H:%M:%S')] DELETION DISCOVERY - Last manifest: $LAST_MANIFEST_DATE, Files deleted between $LAST_MANIFEST_DATE and $(date +%Y-%m-%d)" >> "$ATTIC_LOG"
 else
   echo "[$(date '+%Y-%m-%d %H:%M:%S')] INITIAL SYNC - Any files moved to Attic are from pre-existing conditions" >> "$ATTIC_LOG"
 fi
 
-RSYNC_FLAGS=(-a -m --info=progress2 --partial --modify-window=2 --no-compress
-             --exclude ".Spotlight-V100" --exclude ".Trashes" --exclude ".fseventsd" --exclude ".TemporaryItems"
-             --exclude "._*"
-             --filter "protect $ATTIC_FOLDER/" --filter "protect $ATTIC_FOLDER/***"
-             --filter "protect $REJECTED_FOLDER/" --filter "protect $REJECTED_FOLDER/***"
-             --delete
-             --backup
-             --backup-dir="$ATTIC")
+RSYNC_FLAGS=(-a -m "$(platform_rsync_progress_flag)" --partial --modify-window=2 --no-compress
+  --exclude ".Spotlight-V100" --exclude ".Trashes" --exclude ".fseventsd" --exclude ".TemporaryItems"
+  --exclude "._*" --exclude ".DS_Store"
+  --filter "protect $ATTIC_FOLDER/" --filter "protect $ATTIC_FOLDER/***"
+  --filter "protect $REJECTED_FOLDER/" --filter "protect $REJECTED_FOLDER/***"
+  --delete --backup --backup-dir="$ATTIC")
 [[ -f "$DEST/.tombstones" ]] && RSYNC_FLAGS+=(--exclude-from="$DEST/.tombstones")
 [[ "$FAST_MODE" == "1" ]] && RSYNC_FLAGS+=(-W --omit-dir-times)
 [[ "$DRY_RUN" == "1" ]] && RSYNC_FLAGS+=(-n)
 
 rsync "${RSYNC_FLAGS[@]}" "$SRC"/ "$DEST"/
 
-# Update manifest of mirrored files (relative paths), excluding Attic, system files, and _Rejected folders
 MANIFEST="$DEST/.manifest-last.txt"
-find "$DEST" -type f -print 2>/dev/null | \
-  grep -v "/$ATTIC_FOLDER/" | \
-  grep -v "/$REJECTED_FOLDER/" | \
-  grep -E -v "^$DEST/\\..*$" | \
-  sed -e "s#^$DEST/##" | \
-  sort > "$MANIFEST"
+find "$DEST" -type f -print 2>/dev/null \
+  | grep -v "/$ATTIC_FOLDER/" \
+  | grep -v "/$REJECTED_FOLDER/" \
+  | grep -E -v "^$DEST/\\..*$" \
+  | sed -e "s#^$DEST/##" \
+  | sort > "$MANIFEST"
 
-# --- Prune old Attic files ---
 if [[ -d "$ATTIC" && "$KEEP_DAYS" -gt 0 ]]; then
   log "Pruning $ATTIC_FOLDER files older than $KEEP_DAYS days"
-  find "$ATTIC" -type f ! -name ".deletion-log.txt" -mtime +$KEEP_DAYS -delete 2>/dev/null || true
-  # Clean up empty directories (but keep Attic itself and the log)
+  find "$ATTIC" -type f ! -name ".deletion-log.txt" -mtime +"$KEEP_DAYS" -delete 2>/dev/null || true
   find "$ATTIC" -type d -mindepth 1 -empty -delete 2>/dev/null || true
 fi
 

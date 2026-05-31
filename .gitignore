@@ -1,5 +1,7 @@
-# Editor and IDE files
-.cursor
+# Editor and IDE files (keep project skills shareable)
+.cursor/*
+!.cursor/skills/
+!.cursor/skills/**
 .idea
 .vscode
 
@@ -35,3 +37,6 @@ Desktop.ini
 
 # Logs
 *.log
+
+# Claude Code per-project local settings (personal overrides, never commit)
+.claude/settings.local.json
