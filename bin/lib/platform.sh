@@ -322,10 +322,18 @@ platform_build_card_manifest() {
 platform_measure_source() {
   local src="$1"
   local count size_kb size_h
+  local pipefail_was=0
+  # find/du often exit 1 on .Trashes; with pipefail their pipeline status would be lost.
+  [[ $- == *o* ]] && pipefail_was=1
+  set +o pipefail
   count="$(find "$src" -type f ! -name '._*' ! -name '.DS_Store' 2>/dev/null | wc -l | tr -d ' ')"
+  count="${count:-0}"
   size_kb="$(du -sk "$src" 2>/dev/null | awk '{print $1}')"
+  size_kb="${size_kb:-0}"
   size_h="$(du -sh "$src" 2>/dev/null | awk '{print $1}')"
-  printf '%s\t%s\t%s\n' "${size_kb:-0}" "${size_h:-?}" "${count:-0}"
+  size_h="${size_h:-?}"
+  (( pipefail_was )) && set -o pipefail
+  printf '%s\t%s\t%s\n' "$size_kb" "$size_h" "$count"
 }
 
 # NFS (and similar remote FS) often reject chgrp/chown; rsync -a then exits 23.
