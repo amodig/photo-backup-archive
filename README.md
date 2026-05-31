@@ -25,6 +25,17 @@ The same `CardMirror/<CARD_ID>/` layout is used on both targets so card IDs stay
 
 **If both the travel SSD and NAS are mounted**, prefer mirroring to the travel SSD first (fast local USB); sync or copy to the NAS separately when convenient.
 
+### Ubuntu media server (fastest home path)
+
+Plug the card reader into the **Linux media server** on Ethernet and run the same scripts there. The server writes directly to the NAS mount (no Mac Wi‑Fi hop).
+
+```bash
+# On the media server — set paths in config/config.sh first
+DEST_ROOT="/mnt/nas/PhotoVault/CardMirror" ./bin/card-mirror.sh /media/$USER/A2408A
+```
+
+Auto-detect scans `/media/$USER/*` and `/run/media/$USER/*` (override with `CARD_MOUNT_ROOTS`). **launchd automation is macOS only.**
+
 ## Directory Structure
 
 ```
@@ -32,7 +43,8 @@ photo-backup-archive/
 ├── bin/                    # Main executable scripts
 │   ├── card-mirror.sh      # Main mirroring script with config loading
 │   ├── card-reconcile.sh   # Smart tombstone reconciliation
-│   └── reconcile-all.sh    # Batch reconciliation (for advanced users)
+│   ├── reconcile-all.sh    # Batch reconciliation (for advanced users)
+│   └── lib/platform.sh     # macOS + Linux mount/detection helpers
 ├── config/
 │   └── config.sh           # Optional configuration overrides
 ├── launchd/                # macOS automation
@@ -380,10 +392,10 @@ done
 
 ## Requirements
 
-- **macOS** (tested on recent versions)
-- **rsync** (included with macOS)
-- **zsh** shell (default on modern macOS)
-- **External drive** for backup storage
+- **bash**, **rsync**
+- **macOS**: `diskutil` for card auto-detect; optional **launchd** (`make install`)
+- **Linux** (e.g. Ubuntu media server): `findmnt`, `util-linux` (`lsblk` recommended); card mounts under `/media/$USER/` or `/run/media/$USER/`
+- **External drive** or NAS mount for `DEST_ROOT`
 - **Camera cards** formatted as FAT/exFAT
 
 ## License

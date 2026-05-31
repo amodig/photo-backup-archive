@@ -1,12 +1,13 @@
 # config/config.sh — optional overrides for card-mirror.sh
 #
-# DEST_ROOT defaults in scripts to a travel rugged SSD:
-#   /Volumes/Extreme SSD/PhotoVault/CardMirror
-# Rename "Extreme SSD" to match your drive's volume name in Finder.
+# macOS defaults: /Volumes/Extreme SSD/PhotoVault/CardMirror (travel SSD)
+# Linux defaults:  /mnt/PhotoVault/CardMirror (set CARD_MIRROR_DEST_LINUX or DEST_ROOT)
 #
 # Examples (uncomment one):
-# DEST_ROOT="/Volumes/Extreme SSD/PhotoVault/CardMirror"   # travel / field
-# DEST_ROOT="/Volumes/Photos/PhotoVault/CardMirror"        # home NAS (example)
+# DEST_ROOT="/Volumes/Extreme SSD/PhotoVault/CardMirror"   # macOS travel
+# DEST_ROOT="/Volumes/Photos/PhotoVault/CardMirror"        # macOS home NAS mount
+# DEST_ROOT="/mnt/nas/PhotoVault/CardMirror"             # Ubuntu media server → NAS
+# CARD_MOUNT_ROOTS="/media/amodig:/run/media/amodig"       # Linux card search paths (colon-separated)
 
 # KEEP_DAYS=90
 # FAST_MODE=1
