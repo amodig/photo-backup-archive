@@ -1,9 +1,10 @@
-// Passwordless udisks mount for local plugdev users (optional fallback if udev automount misses a card).
+// Passwordless udisks mount for plugdev users (optional fallback if udev automount misses a card).
+// No subject.local/active check — headless media servers are often managed over SSH.
 // Installed by: ./bin/install-linux-card-mount.sh
 polkit.addRule(function(action, subject) {
     if ((action.id == "org.freedesktop.udisks2.filesystem-mount" ||
          action.id == "org.freedesktop.udisks2.filesystem-mount-system") &&
-        subject.isInGroup("plugdev") && subject.local && subject.active) {
+        subject.isInGroup("plugdev")) {
         return polkit.Result.YES;
     }
 });

@@ -60,7 +60,7 @@ mount_dev() {
   resolve_mount_ids
 
   mkdir -p "$mountpoint"
-  mount -o "uid=${uid},gid=${gid},umask=022" "$node" "$mountpoint"
+  mount -o "uid=${uid},gid=${gid},umask=022,nodev,nosuid,noexec" "$node" "$mountpoint"
 
   if [[ ! -d "$mountpoint/DCIM" && ! -d "$mountpoint/PRIVATE" && ! -d "$mountpoint/AVCHD" ]]; then
     umount "$mountpoint" 2>/dev/null || true

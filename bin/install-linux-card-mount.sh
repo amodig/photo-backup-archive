@@ -52,7 +52,7 @@ chown "${MOUNT_USER}:${MOUNT_USER}" "/media/${MOUNT_USER}" 2>/dev/null || true
 
 if [[ "$INSTALL_POLKIT" == "1" ]]; then
   install -m 0644 "$LINUX_CFG/50-udisks-mount-plugdev.rules" /etc/polkit-1/rules.d/50-udisks-mount-plugdev.rules
-  echo "Installed polkit rule (passwordless udisks mount for plugdev)."
+  echo "Installed polkit rule (passwordless udisks mount for plugdev, including over SSH)."
 else
   echo "Skipped polkit rule (INSTALL_POLKIT=0)."
 fi
