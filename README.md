@@ -149,7 +149,7 @@ photo-backup-archive/
 **Features**:
 - Auto-detects external camera cards (FAT/exFAT with DCIM, PRIVATE, or AVCHD folders)
 - Creates stable card identifiers using `CARD_ID.txt` files
-- Mirrors files with rsync, backing up overwrites/deletes to `Attic/YYYY-MM-DD/`
+- Mirrors files with rsync, backing up overwrites/deletes to `_Attic/YYYY-MM-DD/`
 - Respects `.tombstones` exclusion lists
 - Generates `.manifest-last.txt` for change tracking
 - Automatically prunes old Attic folders based on `KEEP_DAYS`
@@ -382,7 +382,7 @@ CardMirror/CARD-ID/_Attic/
 ### Manual Recovery
 ```bash
 # Find a specific deleted file
-find "/path/to/CardMirror/CARD-ID/Attic" -name "IMG_1234.JPG" -type f
+find "/path/to/CardMirror/CARD-ID/_Attic" -name "IMG_1234.JPG" -type f
 
 # Restore a file
 cp "/path/to/CardMirror/CARD-ID/_Attic/2024-01-15/DCIM/100CANON/IMG_1234.JPG" \
