@@ -91,8 +91,13 @@ else
   log "FastRawViewer: no files under ${REJECTED_FOLDER}."
 fi
 
+sidecar_added="$(platform_tombstone_expand_companion_sidecars "$TOMBSTONES")"
+if (( sidecar_added > 0 )); then
+  log "Companion sidecars: added ${sidecar_added} predicted path(s) (same stem as tombstoned raws)."
+fi
+
 tombstone_total=$(wc -l < "$TOMBSTONES" | tr -d ' ')
-if (( manifest_deleted == 0 && frv_in_rejected == 0 )); then
+if (( manifest_deleted == 0 && frv_in_rejected == 0 && sidecar_added == 0 )); then
   log "Nothing new to tombstone."
   exit 0
 fi

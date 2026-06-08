@@ -187,7 +187,8 @@ CardMirror/
 **How it works**:
 1. Compares keeper files on the archive with the last manifest → tombstones paths you deleted from the mirror
 2. Scans `*/_Rejected/` (FastRawViewer) → tombstones the matching **keeper** paths (e.g. `DCIM/100CANON/_Rejected/foo.CR2` → `/DCIM/100CANON/foo.CR2`)
-3. Next mirror skips tombstoned paths on the card
+3. Expands each tombstoned keeper path to predicted **companion sidecars** on the card (same stem; extensions via `SIDE_CAR_EXTENSIONS`)
+4. Next mirror skips tombstoned paths on the card
 
 **When to use**:
 After culling on the **archive** (not the SD card), especially with FastRawViewer, **before** the next mirror.
@@ -209,6 +210,8 @@ FastRawViewer **moves** rejects into a `_Rejected` subfolder of the folder you a
 
 Scripts **protect** nested `_Rejected` folders during mirror (`rsync` will not delete your FRV staging). Rejects are excluded from `.manifest-last.txt`. `REJECTED_FOLDER` defaults to `_Rejected` (override in `config/config.sh`).
 
+**Sidecars:** FastRawViewer usually moves `.xmp` with the raw into `_Rejected` on the archive (when **Use XMP** is on). The **card** still has raws and sidecars at keeper paths until you delete them. Reconcile therefore tombstones predicted companion paths too (e.g. `/DCIM/100/foo.CR3` → also `/DCIM/100/foo.xmp`, `.acr`, … via `SIDE_CAR_EXTENSIONS`). That stops the next mirror from re-copying sidecars onto the archive. Orphans FRV leaves on the mirror (e.g. `.acr`) are covered the same way.
+
 **Not the same as `_Attic`:** `_Attic` holds files removed by **rsync** when you delete on the **card**. `_Rejected` is your **culling staging area** on the archive; reconcile + tombstones prevent re-copy from the card.
 
 ### Tombstone System (details)
@@ -226,7 +229,7 @@ Tombstones prevent re-copying deleted or rejected files from the card:
 ### Workflow
 1. Mirror card → files copied to archive
 2. Cull on the archive (FastRawViewer `_Rejected` or delete files)
-3. Run `card-reconcile.sh` → deleted/rejected keeper paths added to `.tombstones`
+3. Run `card-reconcile.sh` → deleted/rejected keeper paths and predicted **companion sidecars** added to `.tombstones`
 4. Next mirror skips tombstoned files on the card
 
 ### Management

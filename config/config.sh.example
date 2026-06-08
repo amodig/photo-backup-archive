@@ -15,6 +15,7 @@
 # CARD_MOUNT_ROOTS="/media/${USER}:/run/media/${USER}"
 
 # REJECTED_FOLDER=_Rejected   # FastRawViewer reject subfolder name
+# SIDE_CAR_EXTENSIONS=xmp:XMP:pp3:PP3:dop:DOP:opf:OPF:thm:THM:acr:ACR
 # SHOW_PROGRESS=1
 # PROGRESS_INTERVAL=10
 # KEEP_DAYS=90

@@ -337,6 +337,44 @@ platform_list_keeper_rels() {
   )
 }
 
+# Colon-separated sidecar extensions (override in config/config.sh).
+platform_sidecar_extensions() {
+  local raw="${SIDE_CAR_EXTENSIONS:-xmp:XMP:pp3:PP3:dop:DOP:opf:OPF:thm:THM:acr:ACR}"
+  echo "$raw" | tr ':' ' '
+}
+
+# For each tombstoned keeper path, also tombstone predicted same-stem sidecars on the card
+# (e.g. /DCIM/100/foo.CR3 -> /DCIM/100/foo.xmp). FRV usually moves XMP with reject on the
+# archive, but the card still has sidecars at keeper paths until you delete them.
+# Prints count of companion sidecar paths added.
+platform_tombstone_expand_companion_sidecars() {
+  local tombstones="$1"
+  local tmp line rel dir stem sidecar_rel ext added=0
+  [[ -f "$tombstones" ]] || return 0
+  tmp="$(mktemp)"
+  cp "$tombstones" "$tmp"
+  while IFS= read -r line; do
+    [[ "$line" == /* ]] || continue
+    rel="${line#/}"
+    [[ "$rel" == */* ]] || continue
+    dir="${rel%/*}"
+    stem="${rel##*/}"
+    stem="${stem%.*}"
+    [[ -n "$stem" ]] || continue
+    for ext in $(platform_sidecar_extensions); do
+      sidecar_rel="${dir}/${stem}.${ext}"
+      [[ "$sidecar_rel" == "$rel" ]] && continue
+      if ! grep -Fxq "/${sidecar_rel}" "$tmp" 2>/dev/null; then
+        printf '/%s\n' "$sidecar_rel" >>"$tmp"
+        added=$((added + 1))
+      fi
+    done
+  done <"$tombstones"
+  sort -u "$tmp" -o "$tombstones"
+  rm -f "$tmp"
+  echo "$added"
+}
+
 # Append FastRawViewer reject tombstones: for each file in */_Rejected/, tombstone keeper path.
 # Prints count of keeper paths written (including ones already present).
 platform_tombstone_frv_rejects() {
