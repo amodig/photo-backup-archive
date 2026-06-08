@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# card-reconcile.sh — Smart tombstone reconciliation
+# card-reconcile.sh — Tombstone reconciliation (archive deletes + FastRawViewer rejects)
 # Auto-detects most recent card OR processes specified card
 # Usage: ./card-reconcile.sh [CARD_ID] [DEST_ROOT]
 set -euo pipefail
@@ -65,36 +65,47 @@ TOMBSTONES="$DEST/.tombstones"
 
 log "Running tombstone reconciliation for: $CARD_ID"
 
+touch "$TOMBSTONES"
 CURRENT=$(mktemp)
-trap 'rm -f "$CURRENT"' EXIT
-find "$DEST" -type f -print 2>/dev/null | grep -v "/$ATTIC_FOLDER/" | grep -v "/$REJECTED_FOLDER/" | sed -e "s#^$DEST/##" | sort > "$CURRENT"
+TMP=$(mktemp)
+trap 'rm -f "$CURRENT" "$TMP"' EXIT
 
+platform_list_keeper_rels "$DEST" "$ATTIC_FOLDER" "$REJECTED_FOLDER" | sort > "$CURRENT"
 DELETED=$(comm -23 "$MANIFEST" "$CURRENT" || true)
 
-if [[ -z "$DELETED" ]]; then
-  log "No NAS-side deletions detected to tombstone."
+manifest_deleted=0
+if [[ -n "$DELETED" ]]; then
+  manifest_deleted=$(wc -l <<< "$DELETED" | tr -d ' ')
+  cp "$TOMBSTONES" "$TMP"
+  awk '{print "/"$0}' <<< "$DELETED" >> "$TMP"
+  sort -u "$TMP" -o "$TOMBSTONES"
+  log "Tombstoned ${manifest_deleted} path(s) removed from the archive (vs last manifest)."
+else
+  log "No archive-side deletions detected vs last manifest."
+fi
+
+frv_in_rejected="$(platform_tombstone_frv_rejects "$DEST" "$REJECTED_FOLDER" "$TOMBSTONES")"
+if (( frv_in_rejected > 0 )); then
+  log "FastRawViewer: indexed ${frv_in_rejected} file(s) under ${REJECTED_FOLDER}; keeper paths added to .tombstones."
+else
+  log "FastRawViewer: no files under ${REJECTED_FOLDER}."
+fi
+
+sidecar_added="$(platform_tombstone_expand_companion_sidecars "$TOMBSTONES")"
+if (( sidecar_added > 0 )); then
+  log "Companion sidecars: added ${sidecar_added} predicted path(s) (same stem as tombstoned raws)."
+fi
+
+tombstone_total=$(wc -l < "$TOMBSTONES" | tr -d ' ')
+if (( manifest_deleted == 0 && frv_in_rejected == 0 && sidecar_added == 0 )); then
+  log "Nothing new to tombstone."
   exit 0
 fi
 
-touch "$TOMBSTONES"
-TMP=$(mktemp)
-trap 'rm -f "$TMP" "$CURRENT"' EXIT
-awk '{print "/"$0}' <<< "$DELETED" >> "$TOMBSTONES"
-sort -u "$TOMBSTONES" > "$TMP" && mv "$TMP" "$TOMBSTONES"
+log "Tombstone file now has ${tombstone_total} path(s). Next mirror will skip them on the card."
 
-COUNT=$(wc -l <<< "$DELETED" | tr -d ' ')
-log "Tombstoned $COUNT path(s). They will NOT be re-copied from the card on the next mirror."
-
-rejected_count=0
-while IFS= read -r deleted_file; do
-  [[ -n "$deleted_file" ]] || continue
-  if find "$DEST" -path "*/$REJECTED_FOLDER/*" -name "$(basename "$deleted_file")" -type f 2>/dev/null | head -1 | grep -q .; then
-    rejected_count=$((rejected_count + 1))
-  fi
-done <<< "$DELETED"
-
-if (( rejected_count > 0 )); then
-  log "Found $rejected_count of these files in $REJECTED_FOLDER folders (likely moved during photo culling)"
+if (( frv_in_rejected > 0 )); then
+  log "After review, clear ${REJECTED_FOLDER} in FastRawViewer or delete those folders manually."
 fi
 
 log "Tombstone reconciliation complete for card: $CARD_ID"

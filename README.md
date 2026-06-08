@@ -149,7 +149,7 @@ photo-backup-archive/
 **Features**:
 - Auto-detects external camera cards (FAT/exFAT with DCIM, PRIVATE, or AVCHD folders)
 - Creates stable card identifiers using `CARD_ID.txt` files
-- Mirrors files with rsync, backing up overwrites/deletes to `Attic/YYYY-MM-DD/`
+- Mirrors files with rsync, backing up overwrites/deletes to `_Attic/YYYY-MM-DD/`
 - Respects `.tombstones` exclusion lists
 - Generates `.manifest-last.txt` for change tracking
 - Automatically prunes old Attic folders based on `KEEP_DAYS`
@@ -167,13 +167,13 @@ CardMirror/
     ├── CARD_ID.txt         # Card metadata
     ├── .manifest-last.txt  # File listing from last mirror
     ├── .tombstones         # Exclusion list (if exists)
-    ├── Attic/              # Quarantined files
+    ├── _Attic/             # Quarantined files (rsync deletes/overwrites)
     │   └── YYYY-MM-DD/     # Daily quarantine folders
     └── [mirrored files]    # Your photos and videos
 ```
 
 ### `card-reconcile.sh`
-**Purpose**: Smart tombstone reconciliation with dual modes - auto-detects recent card OR processes specified card.
+**Purpose**: Tombstone reconciliation — archive-side deletes and **FastRawViewer** `_Rejected` culls.
 
 **Usage**:
 ```bash
@@ -185,27 +185,63 @@ CardMirror/
 ```
 
 **How it works**:
-1. **Auto mode**: Scans your card mirrors to find the most recently used one
-2. **Manual mode**: Processes the specified card ID
-3. Compares current files with the last manifest 
-4. Tombstones any files you've deleted from your archive
-5. Next mirror won't re-copy those deleted files
+1. Compares keeper files on the archive with the last manifest → tombstones paths you deleted from the mirror
+2. Scans `*/_Rejected/` (FastRawViewer) → tombstones the matching **keeper** paths (e.g. `DCIM/100CANON/_Rejected/foo.CR2` → `/DCIM/100CANON/foo.CR2`)
+3. Expands each tombstoned keeper path to predicted **companion sidecars** on the card (same stem; extensions via `SIDE_CAR_EXTENSIONS`)
+4. Next mirror skips tombstoned paths on the card
 
 **When to use**:
-After deleting unwanted photos/videos from your archive, run this before the next mirror.
+After culling on the **archive** (not the SD card), especially with FastRawViewer, **before** the next mirror.
 
-**Example workflow**:
+## Culling with FastRawViewer
+
+FastRawViewer **moves** rejects into a `_Rejected` subfolder of the folder you are browsing (default: `DCIM/100CANON/_Rejected/…`). It does not delete files until you **Clear _Rejected folder**.
+
+**Recommended (travel or home):**
+
+1. Mirror the card to the archive (`card-mirror.sh`)
+2. Open the **mirror** in FastRawViewer — e.g. `CardMirror/A2408A/DCIM/…` — not the SD card
+3. Reject shots (⇧⌘⌫) → files move to `…/_Rejected/`
+4. **`card-reconcile.sh`** → tombstones keeper paths so the card will not re-copy them
+5. **`card-mirror.sh`** again when you want new shots synced
+6. When sure, **Clear _Rejected** in FRV or delete those folders manually
+
+**Important:** Run **reconcile before the next mirror**. Otherwise rsync will restore keeper files still on the card.
+
+Scripts **protect** nested `_Rejected` folders during mirror (`rsync` will not delete your FRV staging). Rejects are excluded from `.manifest-last.txt`. `REJECTED_FOLDER` defaults to `_Rejected` (override in `config/config.sh`).
+
+**Sidecars:** FastRawViewer usually moves `.xmp` with the raw into `_Rejected` on the archive (when **Use XMP** is on). The **card** still has raws and sidecars at keeper paths until you delete them. Reconcile therefore tombstones predicted companion paths too (e.g. `/DCIM/100/foo.CR3` → also `/DCIM/100/foo.xmp`, `.acr`, … via `SIDE_CAR_EXTENSIONS`). That stops the next mirror from re-copying sidecars onto the archive. Orphans FRV leaves on the mirror (e.g. `.acr`) are covered the same way.
+
+**Not the same as `_Attic`:** `_Attic` holds files removed by **rsync** when you delete on the **card**. `_Rejected` is your **culling staging area** on the archive; reconcile + tombstones prevent re-copy from the card.
+
+### Tombstone System (details)
+
+Tombstones prevent re-copying deleted or rejected files from the card:
+
+### Format
+`.tombstones` file contains paths with leading `/` anchors:
+```
+/DCIM/100CANON/IMG_1234.JPG
+/DCIM/101CANON/IMG_5678.CR3
+/PRIVATE/M4ROOT/CLIP/0001.MP4
+```
+
+### Workflow
+1. Mirror card → files copied to archive
+2. Cull on the archive (FastRawViewer `_Rejected` or delete files)
+3. Run `card-reconcile.sh` → deleted/rejected keeper paths and predicted **companion sidecars** added to `.tombstones`
+4. Next mirror skips tombstoned files on the card
+
+### Management
 ```bash
-# 1. Mirror card
-./bin/card-mirror.sh
+# View tombstones for a card
+cat "/path/to/CardMirror/CARD-ID/.tombstones"
 
-# 2. Delete unwanted photos from archive
-rm /path/to/CardMirror/CARD-ID/DCIM/100CANON/IMG_*.JPG
+# Manually add path to tombstones
+echo "/DCIM/100CANON/IMG_UNWANTED.JPG" >> "/path/to/CardMirror/CARD-ID/.tombstones"
 
-# 3. Tombstone the deletions (auto-detects recent card)
-./bin/card-reconcile.sh
-
-# 4. Next mirror ignores deleted files
+# Clear all tombstones (will re-copy everything)
+rm "/path/to/CardMirror/CARD-ID/.tombstones"
 ```
 
 ### `reconcile-all.sh`
@@ -326,43 +362,13 @@ CARD_ID=A2408A
 Created=2024-03-15T10:30:00Z
 ```
 
-## Tombstone System
-
-Tombstones prevent re-copying deleted files:
-
-### Format
-`.tombstones` file contains paths with leading `/` anchors:
-```
-/DCIM/100CANON/IMG_1234.JPG
-/DCIM/101CANON/IMG_5678.CR3
-/PRIVATE/M4ROOT/CLIP/0001.MP4
-```
-
-### Workflow
-1. Mirror card → files copied to archive
-2. You delete unwanted files from archive
-3. Run tombstone reconciliation → deleted paths added to `.tombstones`
-4. Next mirror skips tombstoned files
-
-### Management
-```bash
-# View tombstones for a card
-cat "/path/to/CardMirror/CARD-ID/.tombstones"
-
-# Manually add path to tombstones
-echo "/DCIM/100CANON/IMG_UNWANTED.JPG" >> "/path/to/CardMirror/CARD-ID/.tombstones"
-
-# Clear all tombstones (will re-copy everything)
-rm "/path/to/CardMirror/CARD-ID/.tombstones"
-```
-
-## Quarantine System (Attic)
+## Quarantine System (_Attic)
 
 The Attic preserves deleted/overwritten files instead of permanent deletion:
 
 ### Structure
 ```
-CardMirror/CARD-ID/Attic/
+CardMirror/CARD-ID/_Attic/
 ├── 2024-01-15/    # Files deleted/overwritten on Jan 15
 ├── 2024-01-16/    # Files deleted/overwritten on Jan 16
 └── 2024-01-20/    # etc.
@@ -376,10 +382,10 @@ CardMirror/CARD-ID/Attic/
 ### Manual Recovery
 ```bash
 # Find a specific deleted file
-find "/path/to/CardMirror/CARD-ID/Attic" -name "IMG_1234.JPG" -type f
+find "/path/to/CardMirror/CARD-ID/_Attic" -name "IMG_1234.JPG" -type f
 
 # Restore a file
-cp "/path/to/CardMirror/CARD-ID/Attic/2024-01-15/DCIM/100CANON/IMG_1234.JPG" \
+cp "/path/to/CardMirror/CARD-ID/_Attic/2024-01-15/DCIM/100CANON/IMG_1234.JPG" \
    "/path/to/CardMirror/CARD-ID/DCIM/100CANON/"
 ```
 

@@ -277,13 +277,137 @@ platform_mirror_finalize_heartbeat() {
   return 0
 }
 
-# True if a relative path should appear in .manifest-last.txt (matches card-mirror filters).
+# True when rel is inside a FastRawViewer _Rejected tree (per-folder or root-level).
+platform_path_in_rejected_folder() {
+  local rel="$1" rejected="$2"
+  [[ "$rel" == "${rejected}" || "$rel" == "${rejected}"/* ]] && return 0
+  [[ "$rel" == */"${rejected}"/* ]] && return 0
+  return 1
+}
+
+# Keeper path for a file moved to .../<rejected>/filename (FastRawViewer default layout).
+platform_frv_keeper_rel_from_rejected() {
+  local rel="$1" rejected="$2"
+  local parent base
+  if [[ "$rel" == */"${rejected}"/* ]]; then
+    parent="${rel%/"${rejected}"/*}"
+    base="${rel##*/}"
+    echo "${parent}/${base}"
+    return 0
+  fi
+  return 1
+}
+
+# True if a relative path should appear in .manifest-last.txt (keeper files only).
 platform_manifest_include_rel() {
   local rel="$1" attic="$2" rejected="$3"
   [[ "$rel" == "${attic}" || "$rel" == "${attic}"/* ]] && return 1
-  [[ "$rel" == "${rejected}" || "$rel" == "${rejected}"/* ]] && return 1
+  platform_path_in_rejected_folder "$rel" "$rejected" && return 1
   [[ "$rel" != */* && "$rel" == .* ]] && return 1
   return 0
+}
+
+# rsync protect rules: keep archive-side _Attic and FRV _Rejected trees during --delete.
+platform_rsync_protect_archive_flags() {
+  local attic="$1" rejected="$2"
+  printf '%s\n' \
+    "protect ${attic}/" \
+    "protect ${attic}/**" \
+    "protect ${rejected}/" \
+    "protect ${rejected}/**" \
+    "protect */${rejected}/" \
+    "protect */${rejected}/**" \
+    "protect CARD_ID.txt" \
+    "protect .manifest-last.txt" \
+    "protect .tombstones"
+}
+
+# Print sorted keeper-relative paths under dest (stdout).
+platform_list_keeper_rels() {
+  local dest="$1" attic="$2" rejected="$3"
+  local f rel
+  while IFS= read -r -d '' f; do
+    rel="${f#"${dest}/"}"
+    platform_manifest_include_rel "$rel" "$attic" "$rejected" || continue
+    printf '%s\n' "$rel"
+  done < <(
+    find "$dest" -type f \
+      ! -name '._*' ! -name '.DS_Store' \
+      -print0 2>/dev/null
+  )
+}
+
+# Colon-separated sidecar extensions (override in config/config.sh).
+platform_sidecar_extensions() {
+  local raw="${SIDE_CAR_EXTENSIONS:-xmp:XMP:pp3:PP3:dop:DOP:opf:OPF:thm:THM:acr:ACR}"
+  echo "$raw" | tr ':' ' '
+}
+
+# For each tombstoned keeper path, also tombstone predicted same-stem sidecars on the card
+# (e.g. /DCIM/100/foo.CR3 -> /DCIM/100/foo.xmp). FRV usually moves XMP with reject on the
+# archive, but the card still has sidecars at keeper paths until you delete them.
+# Prints count of companion sidecar paths added.
+platform_tombstone_expand_companion_sidecars() {
+  local tombstones="$1"
+  local tmp line rel dir stem sidecar_rel ext added=0
+  [[ -f "$tombstones" ]] || return 0
+  tmp="$(mktemp)"
+  cp "$tombstones" "$tmp"
+  while IFS= read -r line; do
+    [[ "$line" == /* ]] || continue
+    rel="${line#/}"
+    [[ "$rel" == */* ]] || continue
+    dir="${rel%/*}"
+    stem="${rel##*/}"
+    stem="${stem%.*}"
+    [[ -n "$stem" ]] || continue
+    for ext in $(platform_sidecar_extensions); do
+      sidecar_rel="${dir}/${stem}.${ext}"
+      [[ "$sidecar_rel" == "$rel" ]] && continue
+      if ! grep -Fxq "/${sidecar_rel}" "$tmp" 2>/dev/null; then
+        printf '/%s\n' "$sidecar_rel" >>"$tmp"
+        added=$((added + 1))
+      fi
+    done
+  done <"$tombstones"
+  sort -u "$tmp" -o "$tombstones"
+  rm -f "$tmp"
+  echo "$added"
+}
+
+# Append FastRawViewer reject tombstones: for each file in */_Rejected/, tombstone keeper path.
+# Prints count of keeper paths written (including ones already present).
+platform_tombstone_frv_rejects() {
+  local dest="$1" rejected="$2" tombstones="$3"
+  local rel keeper tmp count=0
+  touch "$tombstones"
+  tmp="$(mktemp)"
+  cp "$tombstones" "$tmp"
+  while IFS= read -r -d '' f; do
+    rel="${f#"${dest}/"}"
+    platform_path_in_rejected_folder "$rel" "$rejected" || continue
+    keeper="$(platform_frv_keeper_rel_from_rejected "$rel" "$rejected")" || continue
+    [[ -n "$keeper" ]] || continue
+    printf '/%s\n' "$keeper" >>"$tmp"
+    count=$((count + 1))
+  done < <(
+    find "$dest" -type f \
+      ! -name '._*' ! -name '.DS_Store' \
+      -print0 2>/dev/null
+  )
+  sort -u "$tmp" -o "$tombstones"
+  rm -f "$tmp"
+  echo "$count"
+}
+
+# Count files under any _Rejected folder (for post-mirror reminders).
+platform_count_rejected_files() {
+  local dest="$1" rejected="$2"
+  find "$dest" -type f \
+    ! -name '._*' ! -name '.DS_Store' \
+    -path "*/${rejected}/*" -print 2>/dev/null \
+    | wc -l \
+    | tr -d ' '
 }
 
 # Build sorted manifest; logs scan/sort progress every interval seconds. Sets PLATFORM_MANIFEST_COUNT.

@@ -2,7 +2,7 @@
 #
 # card-mirror.sh — Fast per-card mirror with Attic (quarantine) + tombstones + manifest
 # Mirrors a card to CardMirror/<CardID>/, moves deletions/overwrites into Attic/.
-# Supports per-card .tombstones (exclude list) so NAS-side culls won't be re-copied from the card.
+# Protects FastRawViewer _Rejected staging; use card-reconcile.sh after FRV culls on the archive.
 #
 set -euo pipefail
 IFS=$'\n\t'
@@ -107,10 +107,10 @@ fi
 RSYNC_FLAGS=(-a -m --partial --modify-window=2 --no-compress
   --exclude ".Spotlight-V100" --exclude ".Trashes" --exclude ".fseventsd" --exclude ".TemporaryItems"
   --exclude "._*" --exclude ".DS_Store"
-  --filter "protect $ATTIC_FOLDER/" --filter "protect $ATTIC_FOLDER/***"
-  --filter "protect $REJECTED_FOLDER/" --filter "protect $REJECTED_FOLDER/***"
-  --filter "protect CARD_ID.txt" --filter "protect .manifest-last.txt" --filter "protect .tombstones"
   --delete --backup --backup-dir="$ATTIC")
+while IFS= read -r _protect_rule; do
+  RSYNC_FLAGS+=(--filter "$_protect_rule")
+done < <(platform_rsync_protect_archive_flags "$ATTIC_FOLDER" "$REJECTED_FOLDER")
 [[ "$SHOW_PROGRESS" != "1" ]] && RSYNC_FLAGS+=("$(platform_rsync_info_flags)")
 [[ -f "$DEST/.tombstones" ]] && RSYNC_FLAGS+=(--exclude-from="$DEST/.tombstones")
 [[ "$FAST_MODE" == "1" ]] && RSYNC_FLAGS+=(-W --omit-dir-times)
@@ -176,6 +176,11 @@ while IFS= read -r line; do
   esac
 done < <(platform_build_card_manifest "$DEST" "$MANIFEST" "$ATTIC_FOLDER" "$REJECTED_FOLDER" "$PROGRESS_INTERVAL")
 log "Manifest updated (${manifest_count} paths)"
+
+rejected_count="$(platform_count_rejected_files "$DEST" "$REJECTED_FOLDER")"
+if (( rejected_count > 0 )); then
+  log "Note: ~${rejected_count} file(s) in ${REJECTED_FOLDER} (FastRawViewer) — run card-reconcile.sh before the next mirror if you culled on this archive."
+fi
 
 if [[ -d "$ATTIC" && "$KEEP_DAYS" -gt 0 ]]; then
   log "Pruning $ATTIC_FOLDER files older than $KEEP_DAYS days"
